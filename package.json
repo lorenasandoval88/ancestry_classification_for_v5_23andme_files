@@ -1,0 +1,25 @@
+{
+  "name": "ancestry-classification-for-23andme",
+  "version": "0.1.0",
+  "description": "SDK and web app to classify 23andMe raw-data files into a 1000 Genomes ancestry reference group (AFR, AMR, EAS, EUR, SAS).",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lorenasandoval88/ancestry_classification_for_23andme.git"
+  },
+  "homepage": "https://github.com/lorenasandoval88/ancestry_classification_for_23andme#readme",
+  "keywords": ["23andme", "ancestry", "1000-genomes", "genomics", "pca", "classifier", "browser"],
+  "main": "src/sdk/index.js",
+  "exports": {
+    ".": "./src/sdk/index.js",
+    "./parse": "./src/sdk/parse23andme.js"
+  },
+  "scripts": {
+    "build:catalog": "node scripts/build-catalog.mjs",
+    "build:cohort": "node scripts/build-cohort.mjs",
+    "build:data": "npm run build:catalog && npm run build:cohort",
+    "serve": "npx http-server -p 8080 -c-1"
+  },
+  "files": ["index.html", "src", "scripts", "model", "data/participants_catalog.json", "data/reference_cohort.json", "data/demo_genotype_file", "README.md"]
+}

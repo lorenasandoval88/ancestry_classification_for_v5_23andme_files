@@ -1,0 +1,25 @@
+{
+  "best_parameters": {
+    "logistic_C": 1.0,
+    "pca_components": 10
+  },
+  "branch": "without",
+  "cohort": "train2003",
+  "cohort_run_id": "20261026-164720-2308",
+  "cv_accuracy": 0.996013871013871,
+  "cv_balanced_accuracy": 0.9946434791262377,
+  "cv_groups_sha256": "008e273408909cbfce245cd54338cc94949b4052e31f19a4820d271e73e60fd0",
+  "cv_limitation": "Step 4 SNP QC and pruning used the whole training cohort, including CV validation genotypes; the independent test set is untouched.",
+  "cv_method": "three-fold StratifiedGroupKFold; preprocessing and PCA refitted per fold",
+  "genotype_source": "gs://ref1000g/ancestry/2b_without_visage/results",
+  "no_heldout_genotypes_loaded": true,
+  "population_panel_sha256": "b4023dc6ee2d62ee89c8d4d347db4d348e65518d66d346574cdae7a4bbd76858",
+  "selected_markers": 335632,
+  "sklearn_version": "1.7.2",
+  "status": "trained; held-out test data not used",
+  "step4_summary_sha256": "78bfa8d88ae62b5784e11dbddf0fdd5c3346e3795e580554751217b607268213",
+  "test_people_used": 0,
+  "training_keep_sha256": "f6368f31c239e4f00c303825de1eb09337a31035f078ce45acbd984289d33df9",
+  "training_people": 2003,
+  "visage_markers_in_panel": 0
+}

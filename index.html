@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ancestry Classification for 23andMe</title>
+  <meta name="description" content="Classify 23andMe raw-data files into a 1000 Genomes ancestry reference group (AFR, AMR, EAS, EUR, SAS). Runs entirely in your browser." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%230f766e'/%3E%3Ctext x='16' y='21' font-size='14' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3EA%3C/text%3E%3C/svg%3E" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="src/css/style.css" />
+</head>
+
+<body>
+  <!-- ========== Top banner / navigation ========== -->
+  <nav class="navbar navbar-expand-lg navbar-dark top-nav sticky-top">
+    <div class="container-xl">
+      <a class="navbar-brand d-flex align-items-center gap-2" href="#home">
+        <span class="brand-mark" aria-hidden="true"><i class="fa-solid fa-dna"></i></span>
+        <span class="brand-text">Ancestry<span class="brand-accent">23</span></span>
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#topNav" aria-controls="topNav" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="topNav">
+        <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-1">
+          <li class="nav-item"><a class="nav-link" href="#workspace" data-tab-link="upload">Upload</a></li>
+          <li class="nav-item"><a class="nav-link" href="#workspace" data-tab-link="participants">Participants</a></li>
+          <li class="nav-item"><a class="nav-link" href="#workspace" data-tab-link="genotypes">Genotypes</a></li>
+          <li class="nav-item"><a class="nav-link" href="#about">About</a></li>
+          <li class="nav-item">
+            <a class="nav-link" target="_blank" rel="noopener" href="https://www.npmjs.com/package/ancestry-classification-for-23andme" title="npm package">
+              <i class="fa-brands fa-npm fa-lg"></i><span class="d-lg-none ms-2">npm</span>
+            </a>
+          </li>
+          <li class="nav-item ms-lg-2">
+            <a class="btn btn-github" target="_blank" rel="noopener" href="https://github.com/lorenasandoval88/ancestry_classification_for_23andme">
+              <i class="fa-brands fa-github"></i> GitHub Code
+            </a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ========== Hero ========== -->
+  <header id="home" class="hero">
+    <div class="hero-bg" aria-hidden="true"></div>
+    <div class="container-xl position-relative">
+      <div class="row align-items-center g-5">
+        <div class="col-lg-7">
+          <span class="eyebrow"><i class="fa-solid fa-lock"></i> Runs 100% in your browser · no upload to any server</span>
+          <h1 class="hero-title">Ancestry classification<br />for 23andMe files</h1>
+          <p class="hero-lead">
+            An open-source SDK and web app that assigns a 23andMe v5 raw-data export to the
+            genetically most similar <strong>1000 Genomes reference group</strong> —
+            <span class="pop-badges">
+              <span class="pop pop-AFR">AFR</span><span class="pop pop-AMR">AMR</span><span class="pop pop-EAS">EAS</span><span class="pop pop-EUR">EUR</span><span class="pop pop-SAS">SAS</span>
+            </span>
+            — using a fixed panel of 335,632 markers, 10 principal components and a frozen classifier.
+          </p>
+          <div class="d-flex flex-wrap gap-2 mt-4">
+            <button id="heroUploadBtn" class="btn btn-primary btn-lg px-4" type="button">
+              <i class="fa-solid fa-file-arrow-up me-2"></i>Upload 23andMe file
+            </button>
+            <button id="heroDemoBtn" class="btn btn-outline-light btn-lg px-4" type="button">
+              <i class="fa-solid fa-flask me-2"></i>Try a demo file
+            </button>
+          </div>
+          <p class="hero-fineprint mt-3">
+            Accepts <code>.txt</code> raw-data exports (GRCh37). Files are parsed locally with JavaScript and never leave your device.
+            The demo is a real, anonymised v5 export bundled with the project (16 MB).
+          </p>
+        </div>
+        <div class="col-lg-5">
+          <div class="stat-grid">
+            <div class="stat"><div class="stat-value">335,632</div><div class="stat-label">ancestry markers</div></div>
+            <div class="stat"><div class="stat-value">10</div><div class="stat-label">principal components</div></div>
+            <div class="stat"><div class="stat-value">2,003 / 501</div><div class="stat-label">training / test cohort</div></div>
+            <div class="stat"><div class="stat-value">500 / 501</div><div class="stat-label">test labels correct</div></div>
+            <div class="stat"><div class="stat-value" id="heroParticipants">—</div><div class="stat-label">PGP participants · files</div></div>
+            <div class="stat"><div class="stat-value" id="heroClassified">—</div><div class="stat-label">files classified</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ========== Workspace ========== -->
+  <main id="workspace" class="workspace">
+    <div class="container-xl">
+
+      <ul class="nav nav-tabs workspace-tabs" id="mainTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="tab-upload" data-bs-toggle="tab" data-bs-target="#pane-upload" type="button" role="tab" aria-controls="pane-upload" aria-selected="true">
+            <span class="step">1</span> Upload &amp; Classify
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-participants" data-bs-toggle="tab" data-bs-target="#pane-participants" type="button" role="tab" aria-controls="pane-participants" aria-selected="false">
+            <span class="step">2</span> Participants <span id="participantCount" class="count-pill">…</span>
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-genotypes" data-bs-toggle="tab" data-bs-target="#pane-genotypes" type="button" role="tab" aria-controls="pane-genotypes" aria-selected="false">
+            <span class="step">3</span> Inspect Genotypes
+          </button>
+        </li>
+      </ul>
+
+      <div class="tab-content workspace-content">
+
+        <!-- ---------- Tab 1: Upload ---------- -->
+        <section class="tab-pane fade show active" id="pane-upload" role="tabpanel" aria-labelledby="tab-upload">
+          <div class="row g-4">
+            <div class="col-lg-7">
+              <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="Upload 23andMe files">
+                <input id="fileInput" type="file" accept=".txt,text/plain" multiple hidden />
+                <div class="drop-icon"><i class="fa-solid fa-cloud-arrow-up"></i></div>
+                <h3 class="drop-title">Drop 23andMe raw-data files here</h3>
+                <p class="drop-sub">or <span class="link-like">browse your computer</span>. Multiple files supported.</p>
+                <div class="d-flex flex-wrap justify-content-center gap-2 mt-3">
+                  <span class="chip"><i class="fa-solid fa-file-lines"></i> genome_*.txt</span>
+                  <span class="chip"><i class="fa-solid fa-microchip"></i> 23andMe v5 (also v3/v4)</span>
+                  <span class="chip"><i class="fa-solid fa-dna"></i> GRCh37 / build 37</span>
+                </div>
+              </div>
+              <div id="uploadStatus" class="upload-status" aria-live="polite"></div>
+            </div>
+
+            <div class="col-lg-5">
+              <div class="panel">
+                <div class="panel-header">
+                  <h2 class="panel-title"><i class="fa-solid fa-list-check me-2 text-accent"></i>Loaded files</h2>
+                  <div class="d-flex gap-2">
+                    <button id="classifyAllBtn" class="btn btn-sm btn-primary" type="button" disabled>
+                      <i class="fa-solid fa-wand-magic-sparkles me-1"></i>Classify all
+                    </button>
+                    <button id="clearAllBtn" class="btn btn-sm btn-outline-secondary" type="button" disabled title="Remove all loaded files">
+                      <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                  </div>
+                </div>
+                <div id="fileList" class="file-list">
+                  <div class="empty-state">
+                    <i class="fa-regular fa-folder-open"></i>
+                    <p>No files loaded yet.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="panel mt-4">
+                <div class="panel-header">
+                  <h2 class="panel-title"><i class="fa-solid fa-diagram-project me-2 text-accent"></i>Pipeline</h2>
+                  <div id="modelStatus" aria-live="polite"></div>
+                </div>
+                <ol class="pipeline">
+                  <li><span class="pipe-step">Validate</span> chip version, genome build (GRCh37), missing calls</li>
+                  <li><span class="pipe-step">Encode</span> count the REF allele (0/1/2) at each of the 335,632 panel markers</li>
+                  <li><span class="pipe-step">Impute</span> fill missing or incompatible markers with the training means</li>
+                  <li><span class="pipe-step">Classify</span> StandardScaler → PCA (10) → logistic regression (ONNX, in-browser)</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------- Tab 2: Participants ---------- -->
+        <section class="tab-pane fade" id="pane-participants" role="tabpanel" aria-labelledby="tab-participants">
+          <div class="panel">
+            <div class="panel-header flex-wrap gap-2">
+              <div>
+                <h2 class="panel-title">Participants, reference cohort &amp; genotype files</h2>
+                <p class="panel-sub">
+                  The <strong>1000 Genomes</strong> people used to train (2,003) and test (501) the classifier, with their <em>known</em> super-population labels
+                  (from <code>data/reference_cohort.json</code>); public <a href="https://my.pgp-hms.org/" target="_blank" rel="noopener">Personal Genome Project</a> participants with 23andMe files
+                  (<code>data/participants_catalog.json</code>); and any files you upload. One row per person or file.
+                  Self-reported sex, race and ethnicity come from PGP surveys and are shown separately from the predicted reference group.
+                </p>
+              </div>
+              <div class="toolbar">
+                <div class="search-box">
+                  <i class="fa-solid fa-magnifying-glass"></i>
+                  <input id="participantSearch" type="search" class="form-control form-control-sm" placeholder="HG00096, huA08F4D, GBR, file name…" aria-label="Search participants" />
+                </div>
+                <select id="participantSourceFilter" class="form-select form-select-sm" aria-label="Filter by source">
+                  <option value="">All sources</option>
+                  <option value="1000G train">1000G train (2,003)</option>
+                  <option value="1000G test">1000G test (501)</option>
+                  <option value="PGP">PGP catalog</option>
+                  <option value="Upload">Uploaded</option>
+                </select>
+                <select id="participantChipFilter" class="form-select form-select-sm" aria-label="Filter by chip version">
+                  <option value="">All chips</option>
+                </select>
+                <select id="participantBuildFilter" class="form-select form-select-sm" aria-label="Filter by build">
+                  <option value="">All builds</option>
+                </select>
+                <select id="participantGroupFilter" class="form-select form-select-sm" aria-label="Filter by predicted ancestry">
+                  <option value="">Any ancestry</option>
+                  <option value="AFR">AFR</option>
+                  <option value="AMR">AMR</option>
+                  <option value="EAS">EAS</option>
+                  <option value="EUR">EUR</option>
+                  <option value="SAS">SAS</option>
+                  <option value="__none">Not classified</option>
+                </select>
+                <select id="participantSexFilter" class="form-select form-select-sm" aria-label="Filter by sex">
+                  <option value="">Any sex</option>
+                </select>
+                <select id="participantValidFilter" class="form-select form-select-sm" aria-label="Filter by file validity">
+                  <option value="">All files</option>
+                  <option value="valid">Valid 23andMe only</option>
+                  <option value="invalid">Invalid / unsupported</option>
+                </select>
+                <select id="participantPageSize" class="form-select form-select-sm" aria-label="Rows per page">
+                  <option value="25">25 rows</option>
+                  <option value="50" selected>50 rows</option>
+                  <option value="100">100 rows</option>
+                  <option value="1000">1,000 rows</option>
+                  <option value="100000">All rows</option>
+                </select>
+                <button id="participantExportBtn" class="btn btn-sm btn-outline-secondary" type="button" title="Download filtered rows as CSV">
+                  <i class="fa-solid fa-download me-1"></i>CSV
+                </button>
+              </div>
+            </div>
+
+            <div id="participantStats" class="geno-summary"></div>
+
+            <div class="table-wrap">
+              <table class="table data-table" id="participantTable">
+                <thead>
+                  <tr>
+                    <th data-sort="participant">Participant</th>
+                    <th data-sort="source">Source</th>
+                    <th data-sort="fileName">File</th>
+                    <th data-sort="chip">Chip</th>
+                    <th data-sort="build">Build</th>
+                    <th data-sort="variants" class="num">Variants</th>
+                    <th data-sort="valid">Valid</th>
+                    <th data-sort="sex">Sex</th>
+                    <th data-sort="race">Population / race-ethnicity</th>
+                    <th data-sort="birthYear" class="num">Born</th>
+                    <th data-sort="state">State</th>
+                    <th data-sort="published">Published</th>
+                    <th data-sort="group">Reference group</th>
+                    <th data-sort="calledFraction" class="num">Called</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+              <div id="participantEmpty" class="empty-state">
+                <i class="fa-solid fa-users"></i>
+                <p id="participantEmptyMsg">Loading participant catalog…</p>
+              </div>
+            </div>
+            <div class="table-footer">
+              <span id="participantSummary" class="text-muted small"></span>
+              <nav aria-label="Participant table pagination">
+                <ul class="pagination pagination-sm mb-0" id="participantPagination"></ul>
+              </nav>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------- Tab 3: Genotypes ---------- -->
+        <section class="tab-pane fade" id="pane-genotypes" role="tabpanel" aria-labelledby="tab-genotypes">
+          <div class="panel">
+            <div class="panel-header flex-wrap gap-2">
+              <div>
+                <h2 class="panel-title">Genotype inspector</h2>
+                <p class="panel-sub">Search by rsID or position, filter by chromosome and genotype class, and sort any column.</p>
+              </div>
+              <div class="toolbar">
+                <select id="genoFileSelect" class="form-select form-select-sm" aria-label="Select file">
+                  <option value="">— select a file —</option>
+                </select>
+                <div class="search-box">
+                  <i class="fa-solid fa-magnifying-glass"></i>
+                  <input id="genoSearch" type="search" class="form-control form-control-sm" placeholder="rs12345, 7:117559590…" aria-label="Search genotypes" />
+                </div>
+                <select id="genoChromFilter" class="form-select form-select-sm" aria-label="Filter by chromosome">
+                  <option value="">All chromosomes</option>
+                </select>
+                <select id="genoClassFilter" class="form-select form-select-sm" aria-label="Filter by genotype class">
+                  <option value="">All genotypes</option>
+                  <option value="hom">Homozygous</option>
+                  <option value="het">Heterozygous</option>
+                  <option value="hemi">Hemizygous (single allele)</option>
+                  <option value="nocall">No-call (--)</option>
+                  <option value="indel">Indel (I/D)</option>
+                </select>
+                <select id="genoPageSize" class="form-select form-select-sm" aria-label="Rows per page">
+                  <option value="25">25 rows</option>
+                  <option value="50" selected>50 rows</option>
+                  <option value="100">100 rows</option>
+                  <option value="250">250 rows</option>
+                </select>
+                <button id="genoExportBtn" class="btn btn-sm btn-outline-secondary" type="button" title="Download filtered rows as CSV">
+                  <i class="fa-solid fa-download me-1"></i>CSV
+                </button>
+              </div>
+            </div>
+
+            <div id="genoSummary" class="geno-summary"></div>
+
+            <div class="table-wrap">
+              <table class="table data-table mono" id="genoTable">
+                <thead>
+                  <tr>
+                    <th data-sort="idx" class="num">#</th>
+                    <th data-sort="rsid">rsID</th>
+                    <th data-sort="chrom">Chr</th>
+                    <th data-sort="pos" class="num">Position</th>
+                    <th data-sort="genotype">Genotype</th>
+                    <th data-sort="cls">Class</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+              <div id="genoEmpty" class="empty-state">
+                <i class="fa-solid fa-table-list"></i>
+                <p>Select a loaded file to inspect its genotypes.</p>
+              </div>
+            </div>
+
+            <div class="table-footer">
+              <span id="genoPageInfo" class="text-muted small"></span>
+              <nav aria-label="Genotype table pagination">
+                <ul class="pagination pagination-sm mb-0" id="genoPagination"></ul>
+              </nav>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- ========== About ========== -->
+  <section id="about" class="about">
+    <div class="container-xl">
+      <div class="row g-4">
+        <div class="col-lg-4">
+          <h2 class="section-title">About the classifier</h2>
+          <p class="text-muted">
+            The model is trained on the 1000 Genomes Phase 3 reference (2,504 people, 26 populations) and reports the
+            super-population that is genetically most similar to the uploaded profile. It is intended as a reusable,
+            frozen component for downstream genomics workflows such as polygenic-score imputation evaluation.
+          </p>
+          <a class="btn btn-outline-dark" target="_blank" rel="noopener" href="https://github.com/lorenasandoval88/ancestry_classification_for_23andme#readme">
+            <i class="fa-solid fa-book me-2"></i>Read the documentation
+          </a>
+        </div>
+        <div class="col-lg-8">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="info-card">
+                <i class="fa-solid fa-code"></i>
+                <h3>Use it as an SDK</h3>
+                <pre><code>npm i ancestry-classification-for-23andme
+
+import { classifyAncestry } from
+  "ancestry-classification-for-23andme";
+const r = await classifyAncestry(fileText);
+r.group;   // "EUR"
+r.scores;  // { AFR, AMR, EAS, EUR, SAS }</code></pre>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="info-card">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                <h3>Interpreting results</h3>
+                <ul class="mb-0">
+                  <li>Output is <em>genetic similarity to a reference group</em>, not an admixture proportion.</li>
+                  <li><strong>AMR</strong> denotes the admixed American reference populations, not an Indigenous American label.</li>
+                  <li>Genetic group assignment is separate from self-reported race and ethnicity.</li>
+                  <li>Files that fail input checks return a reason and no classification.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container-xl d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <span>© <span id="year"></span> Ancestry Classification for 23andMe · Research software, not a clinical tool.</span>
+      <span class="d-flex gap-3">
+        <a href="https://github.com/lorenasandoval88/ancestry_classification_for_23andme" target="_blank" rel="noopener"><i class="fa-brands fa-github"></i> GitHub</a>
+        <a href="https://www.internationalgenome.org/" target="_blank" rel="noopener">1000 Genomes</a>
+        <a href="https://episphere.github.io/diseasome/" target="_blank" rel="noopener">Diseasome</a>
+      </span>
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script type="module" src="src/app/app.js"></script>
+</body>
+</html>

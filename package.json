@@ -1,0 +1,20 @@
+{
+  "name": "ancestry_classification_for_23andme",
+  "version": "1.0.0",
+  "description": "Local browser inference for exported 23andMe ancestry classifiers",
+  "main": "./src/index.js",
+  "exports": "./src/index.js",
+  "files": ["src", "tools/export_model.py", "tools/verify_parity.mjs"],
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lorenasandoval88/ancestry_classification_for_23andme.git"
+  },
+  "keywords": [],
+  "author": "",
+  "type": "module",
+  "engines": {"node": ">=20"}
+}

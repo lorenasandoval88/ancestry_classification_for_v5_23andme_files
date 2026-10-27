@@ -108,6 +108,17 @@ test('raw input needs a vendor header or an explicit provenance assertion', () =
   assert.equal(classifier.classify('# 23andMe\n# build 37 GRCh38\n').reason.code, 'INVALID_FILE');
 });
 
+test('chip header parsing handles separators and long whitespace without backtracking', () => {
+  const { model } = fixture();
+  const classifier = createClassifier(model);
+  for (const header of ['chip: v5', 'platform version = 5', `chip${' '.repeat(100000)}v5`]) {
+    const text = `# 23andMe\n# ${header}\n# GRCh37\nrs1 1 100 GG\n`;
+    assert.equal(classifier.classify(text).status, 'classified');
+  }
+  const malformed = `# 23andMe\n# chip${' '.repeat(100000)}unknown\n# GRCh37\nrs1 1 100 GG\n`;
+  assert.equal(classifier.classify(malformed).reason.code, 'UNSUPPORTED_FILE');
+});
+
 for (const [label, change, reason] of [
   ['wrong chip', x => { x.chip = 'v4'; }, 'UNSUPPORTED_FILE'],
   ['wrong build', x => { x.build = 'GRCh38'; }, 'UNSUPPORTED_FILE'],

@@ -82,7 +82,12 @@ export function parse23andMe(text, metadata = {}) {
         assert(!headerBuild || headerBuild === found, 'Conflicting reference builds');
         headerBuild = found;
       }
-      const chip = line.match(/(?:chip|platform)(?:\s+version)?\s*[:=]?\s*v?([1-9]\d*)\b/i);
+      const chipLabel = line.match(/\b(?:chip|platform)\b/i);
+      const tokens = chipLabel
+        ? line.slice(chipLabel.index + chipLabel[0].length).split(/[\s:=]+/).filter(Boolean)
+        : [];
+      if (tokens[0]?.toLowerCase() === 'version') tokens.shift();
+      const chip = tokens[0]?.match(/^v?([1-9]\d*)$/i);
       if (chip) {
         const found = `v${chip[1]}`;
         assert(!headerChip || headerChip === found, 'Conflicting chip versions');

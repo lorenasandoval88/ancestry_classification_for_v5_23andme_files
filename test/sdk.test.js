@@ -170,6 +170,16 @@ test('OVR scores agree with normalized sigmoid and are stable for extreme logits
   assert.ok(Object.values(result.scores).every(Number.isFinite));
 });
 
+test('predicted label follows decision scores even when OVR probabilities round to a tie', () => {
+  const { model, upload } = fixture();
+  model.probabilityMode = 'ovr';
+  model.coefficients.forEach(row => row.fill(0));
+  model.intercepts = [40, 41, 42, 43, 44];
+  const result = createClassifier(model).classify(upload);
+  assert.equal(result.predictedGroup, model.classes[4]);
+  assert.equal(result.scores.SAS, result.scores.AMR);
+});
+
 test('attaches both successes and rejections without modifying existing profile fields', () => {
   const { model, upload } = fixture();
   const data = { profile: { example: true }, existing: 42 };

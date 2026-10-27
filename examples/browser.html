@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local ancestry SDK demo</title>
+</head>
+<body>
+  <h1>Local ancestry SDK demo</h1>
+  <p>Files stay in this browser. No trained model is bundled. Scores are reference-group
+    assignments, not ancestry percentages or self-reported race/ethnicity.</p>
+  <form id="classify">
+    <p><label>Trusted exported model JSON <input id="model" type="file" accept=".json" required></label></p>
+    <p><label>23andMe text or genotype JSON <input id="genotype" type="file" accept=".txt,.json" required></label></p>
+    <p><label><input id="v5" type="checkbox">
+      I have independently confirmed this file is 23andMe v5.</label></p>
+    <p><label><input id="grch37" type="checkbox">
+      I have independently confirmed GRCh37 (needed only if headers lack the build).</label></p>
+    <button type="submit">Classify locally</button>
+  </form>
+  <pre id="result" role="status" aria-live="polite"></pre>
+  <p>Large files may pause this minimal demo. Use a Web Worker in a production application.</p>
+  <script type="module">
+    import { createClassifier } from '../src/index.js';
+
+    const form = document.querySelector('#classify');
+    const output = document.querySelector('#result');
+    const button = form.querySelector('button');
+    let cachedFile;
+    let classifier;
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      output.textContent = 'Processing locally…';
+      button.disabled = true;
+      try {
+        const modelFile = document.querySelector('#model').files[0];
+        const genotypeFile = document.querySelector('#genotype').files[0];
+        if (!modelFile || !genotypeFile) throw new Error('Select both files');
+        if (cachedFile !== modelFile) {
+          classifier = createClassifier(JSON.parse(await modelFile.text()));
+          cachedFile = modelFile;
+        }
+        const metadata = {};
+        if (document.querySelector('#v5').checked) metadata.chip = 'v5';
+        if (document.querySelector('#grch37').checked) metadata.build = 'GRCh37';
+        const result = classifier.classify(await genotypeFile.text(), metadata);
+        output.textContent = JSON.stringify(result, null, 2);
+      } catch (error) {
+        output.textContent = `Unable to classify: ${error.message}`;
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -252,7 +252,7 @@ export function createClassifier(artifact) {
     if (!probabilities.every(Number.isFinite)) {
       return failure('NUMERICAL_ERROR', 'Model produced non-finite scores', model.modelVersion, quality);
     }
-    const best = probabilities.indexOf(Math.max(...probabilities));
+    const best = logits.indexOf(Math.max(...logits));
     return {
       status: 'classified', modelVersion: model.modelVersion,
       predictedGroup: model.classes[best],

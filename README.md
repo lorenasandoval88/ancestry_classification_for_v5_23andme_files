@@ -1,6 +1,6 @@
-# ancestry_classification_for_23andme
+# ancestry_classification_for_v5_23andme_files
 
-live at https://lorenasandoval88.github.io/ancestry_classification_for_v5_23andme_files/
+**Live app:** https://lorenasandoval88.github.io/ancestry_classification_for_v5_23andme_files/
 
 An **SDK (npm package) and web app** for classifying 23andMe raw-data files into a genetic
 ancestry reference group. Upload or pass in a 23andMe v5 export and the classifier returns

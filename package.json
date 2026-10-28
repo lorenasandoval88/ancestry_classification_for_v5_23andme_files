@@ -6,9 +6,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/lorenasandoval88/ancestry_classification_for_23andme.git"
+    "url": "https://github.com/lorenasandoval88/ancestry_classification_for_v5_23andme_files.git"
   },
-  "homepage": "https://github.com/lorenasandoval88/ancestry_classification_for_23andme#readme",
+  "homepage": "https://lorenasandoval88.github.io/ancestry_classification_for_v5_23andme_files/",
+  "bugs": "https://github.com/lorenasandoval88/ancestry_classification_for_v5_23andme_files/issues",
   "keywords": ["23andme", "ancestry", "1000-genomes", "genomics", "pca", "classifier", "browser"],
   "main": "src/sdk/index.js",
   "exports": {

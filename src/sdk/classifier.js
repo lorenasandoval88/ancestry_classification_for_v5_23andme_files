@@ -1,26 +1,29 @@
-// Browser/Node ancestry classifier.
+// Browser/Node ancestry classifier for the Step 6/7 browser release bundle.
 //
-// Mirrors the training encoding in data/training_model/cloudModel/train_ancestry.py:
-//   * features are the 335,632 selected markers, in the saved order (model/markers.tsv)
-//   * dosage = PLINK `--export A` count of the REF allele (counted_allele) -> 0, 1 or 2
-//   * missing markers -> training mean (SimpleImputer statistics, model/means.f32)
-//   * then StandardScaler -> PCA -> LogisticRegression, exported to ONNX by scripts/export_onnx.py
+// Artifact contract (produced by scripts/export_onnx.py or the cloud Step 6 exporter):
+//   model/model.onnx          input  dosages[N, n_markers] float32 (REF-allele count 0/1/2, NaN = missing)
+//                             outputs probabilities[N, C], pc_scores[N, K], label_index[N]
+//   model/markers.json        { n_markers, counted_allele: "REF", markers: ["chr:pos:ref:alt", ...] }
+//   model/metadata.json       { classes, n_markers, n_components, coverage_rules, artifacts, parity, ... }
+//   model/pca_reference.json  (optional) PC scores of reference people for the PCA plot
 //
-// Artifacts are loaded lazily from `modelBase` (default "model/"). If model_meta.json
-// is absent the classifier reports { available: false } so the UI can show "model pending".
+// Missing-value imputation happens inside the ONNX graph (fitted training means), so the
+// encoder only has to produce 0/1/2 or NaN per marker in the saved marker order.
 
 import { parse23andMe, genotypeClass } from "./parse23andme.js";
 
 const ORT_VERSION = "1.20.1";
 const ORT_CDN = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
+const DEFAULT_RULES = { min_called_fraction: 0.9, max_incompatible_fraction: 0.01 };
 
 const state = {
   modelBase: "model/",
+  ortCdn: null,
   status: "idle", // idle | loading | ready | missing | error
   error: null,
   meta: null,
-  markers: null, // { chrom: string[], pos: Int32Array, ref: string[], alt: string[] }
-  means: null,   // Float32Array
+  markers: null,   // { chrom: string[], pos: Int32Array, ref: string[], alt: string[] }
+  pcaRef: undefined, // undefined = not fetched yet, null = absent
   session: null,
   ort: null,
   loading: null,
@@ -35,7 +38,14 @@ export function modelStatus() {
   return { status: state.status, error: state.error, meta: state.meta };
 }
 
-/** Resolve to true when the model artifacts are present and loaded, false when absent. */
+async function fetchJson(name, { optional = false } = {}) {
+  const res = await fetch(`${state.modelBase}${name}`, { cache: "no-cache" });
+  if (res.status === 404 && optional) return null;
+  if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
+  return res.json();
+}
+
+/** Resolve to true when the model bundle is present and loaded, false when absent. */
 export async function loadModel() {
   if (state.status === "ready") return true;
   if (state.status === "missing") return false;
@@ -43,26 +53,19 @@ export async function loadModel() {
   state.status = "loading";
   state.loading = (async () => {
     try {
-      const metaRes = await fetch(`${state.modelBase}model_meta.json`, { cache: "no-cache" });
+      const metaRes = await fetch(`${state.modelBase}metadata.json`, { cache: "no-cache" });
       if (metaRes.status === 404) { state.status = "missing"; return false; }
-      if (!metaRes.ok) throw new Error(`model_meta.json: HTTP ${metaRes.status}`);
+      if (!metaRes.ok) throw new Error(`metadata.json: HTTP ${metaRes.status}`);
       state.meta = await metaRes.json();
 
-      const [markersText, meansBuf, ort] = await Promise.all([
-        fetch(`${state.modelBase}markers.tsv`).then((r) => { if (!r.ok) throw new Error(`markers.tsv: HTTP ${r.status}`); return r.text(); }),
-        fetch(`${state.modelBase}means.f32`).then((r) => { if (!r.ok) throw new Error(`means.f32: HTTP ${r.status}`); return r.arrayBuffer(); }),
-        loadOrt(),
-      ]);
-      state.markers = parseMarkers(markersText);
-      state.means = new Float32Array(meansBuf);
-      const n = state.meta.n_features;
-      if (state.markers.pos.length !== n || state.means.length !== n) {
-        throw new Error(`Artifact size mismatch: meta=${n}, markers=${state.markers.pos.length}, means=${state.means.length}`);
+      const [markersJson, ort] = await Promise.all([fetchJson("markers.json"), loadOrt()]);
+      state.markers = parseMarkers(markersJson);
+      const n = state.meta.n_markers;
+      if (n != null && state.markers.pos.length !== n) {
+        throw new Error(`markers.json has ${state.markers.pos.length} markers, metadata says ${n}`);
       }
       state.ort = ort;
-      state.session = await ort.InferenceSession.create(`${state.modelBase}ancestry_pipeline.onnx`, {
-        executionProviders: ["wasm"],
-      });
+      state.session = await ort.InferenceSession.create(`${state.modelBase}model.onnx`, { executionProviders: ["wasm"] });
       state.status = "ready";
       return true;
     } catch (e) {
@@ -76,6 +79,18 @@ export async function loadModel() {
   return state.loading;
 }
 
+/** PC coordinates of the reference people (train / test / v5 files), or null if not published. */
+export async function loadPcaReference() {
+  if (state.pcaRef !== undefined) return state.pcaRef;
+  try {
+    state.pcaRef = await fetchJson("pca_reference.json", { optional: true });
+  } catch (e) {
+    console.warn("pca_reference.json:", e.message);
+    state.pcaRef = null;
+  }
+  return state.pcaRef;
+}
+
 async function loadOrt() {
   if (globalThis.ort) return globalThis.ort;
   const base = state.ortCdn || ORT_CDN;
@@ -85,42 +100,48 @@ async function loadOrt() {
   return ort;
 }
 
-function parseMarkers(text) {
-  const lines = text.split(/\r?\n/);
-  const n = lines.length - 1 - (lines[lines.length - 1] === "" ? 1 : 0);
+/** Accepts {markers:[...]} / a bare array of "chr:pos:ref:alt" strings / columnar {chrom,pos,ref,alt}. */
+function parseMarkers(json) {
+  if (json && Array.isArray(json.chrom) && Array.isArray(json.pos)) {
+    return { chrom: json.chrom.map(String), pos: Int32Array.from(json.pos), ref: json.ref, alt: json.alt };
+  }
+  const list = Array.isArray(json) ? json : json?.markers;
+  if (!Array.isArray(list)) throw new Error("markers.json: unrecognised format");
+  const n = list.length;
   const chrom = new Array(n), ref = new Array(n), alt = new Array(n);
   const pos = new Int32Array(n);
-  let k = 0;
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line) continue;
-    const tab = line.indexOf("\t");
-    const id = tab === -1 ? line : line.slice(0, tab);
-    const counted = tab === -1 ? null : line.slice(tab + 1).trim();
-    const [c, p, r, a] = id.split(":");
-    if (counted && counted !== r) throw new Error(`Marker ${id}: counted allele ${counted} is not REF`);
-    chrom[k] = c; pos[k] = Number(p); ref[k] = r; alt[k] = a; k++;
+  for (let i = 0; i < n; i++) {
+    const m = list[i];
+    let c, p, r, a;
+    if (typeof m === "string") [c, p, r, a] = m.split(":");
+    else if (Array.isArray(m)) [c, p, r, a] = m;
+    else { c = m.chrom ?? m.chromosome; p = m.pos ?? m.position; r = m.ref ?? m.counted_allele; a = m.alt; }
+    if (m?.counted_allele && m.counted_allele !== r) throw new Error(`Marker ${c}:${p}: counted allele is not REF`);
+    chrom[i] = String(c); pos[i] = Number(p); ref[i] = r; alt[i] = a;
   }
-  return { chrom, pos: pos.subarray(0, k), ref: ref.slice(0, k), alt: alt.slice(0, k) };
+  return { chrom, pos, ref, alt };
 }
 
 /**
- * Build the model feature vector for a parsed 23andMe file.
- * Returns { x: Float32Array, called, missing, incompatible }.
+ * Build the model input for a parsed 23andMe file: REF-allele count (0/1/2) per marker,
+ * NaN where the marker is absent, no-call, or carries alleles outside {REF, ALT}.
+ * Returns { x, called, missing, incompatible, matched, nFeatures }.
  */
-export function encodeDosages(parsed, markers = state.markers, means = state.means) {
-  if (!markers || !means) throw new Error("Model artifacts not loaded");
+export function encodeDosages(parsed, markers = state.markers) {
+  if (!markers) throw new Error("Model artifacts not loaded");
   const n = markers.pos.length;
 
-  // chrom:pos -> genotype, autosomes only (the panel has chromosomes 1-22).
   const lookup = new Map();
   for (let i = 0; i < parsed.nSnps; i++) {
     const c = parsed.chrom[i];
     if (c === "X" || c === "Y" || c === "MT") continue;
-    lookup.set(`${c}:${parsed.pos[i]}`, parsed.genotype[i]);
+    const key = `${c}:${parsed.pos[i]}`;
+    // Conflicting duplicate coordinates are treated as missing.
+    if (lookup.has(key) && lookup.get(key) !== parsed.genotype[i]) lookup.set(key, "--");
+    else lookup.set(key, parsed.genotype[i]);
   }
 
-  const x = new Float32Array(means); // start from the training means (upstream imputation)
+  const x = new Float32Array(n).fill(NaN);
   let called = 0, missing = 0, incompatible = 0;
   for (let j = 0; j < n; j++) {
     const g = lookup.get(`${markers.chrom[j]}:${markers.pos[j]}`);
@@ -132,46 +153,73 @@ export function encodeDosages(parsed, markers = state.markers, means = state.mea
     x[j] = (g0 === r ? 1 : 0) + (g1 === r ? 1 : 0);
     called++;
   }
-  return { x, called, missing, incompatible, nFeatures: n };
+  return { x, called, missing, incompatible, matched: called + incompatible, nFeatures: n };
+}
+
+/** Apply metadata.coverage_rules; returns null when the input is acceptable, else a reason string. */
+export function coverageProblem(enc, rules = state.meta?.coverage_rules || DEFAULT_RULES) {
+  const calledFraction = enc.called / enc.nFeatures;
+  const incompatibleFraction = enc.matched ? enc.incompatible / enc.matched : 0;
+  const minCalled = rules.min_called_fraction ?? DEFAULT_RULES.min_called_fraction;
+  const maxIncompat = rules.max_incompatible_fraction ?? DEFAULT_RULES.max_incompatible_fraction;
+  if (calledFraction < minCalled) return `only ${(calledFraction * 100).toFixed(1)}% of model markers called (minimum ${(minCalled * 100).toFixed(0)}%)`;
+  if (incompatibleFraction > maxIncompat) return `${(incompatibleFraction * 100).toFixed(2)}% of matched markers have incompatible alleles (maximum ${(maxIncompat * 100).toFixed(1)}%)`;
+  return null;
 }
 
 /**
- * Classify a parsed 23andMe file. Resolves to
- *   { available: false } when the model is not exported yet, otherwise
- *   { available: true, group, scores, coverage, calledMarkers, missingMarkers, incompatibleMarkers, model }.
+ * Classify a parsed 23andMe file. Resolves to one of
+ *   { available: false, status }                                 model bundle not published
+ *   { available: true, status: "skipped", reason, coverage… }    failed the coverage / build rules
+ *   { available: true, status: "classified", group, scores, pcScores, coverage… }
  */
 export async function classifyParsed(parsed) {
   const ok = await loadModel();
   if (!ok) return { available: false, status: state.status };
+  const { ort, session, meta } = state;
 
   const enc = encodeDosages(parsed);
-  const { ort, session, meta } = state;
-  const input = new ort.Tensor("float32", enc.x, [1, enc.nFeatures]);
-  const out = await session.run({ [meta.input_name || session.inputNames[0]]: input });
-
-  const probName = session.outputNames.find((o) => /prob/i.test(o)) || session.outputNames[1];
-  const labelName = session.outputNames.find((o) => /label/i.test(o)) || session.outputNames[0];
-  const probs = Array.from(out[probName].data);
-  const classes = meta.classes;
-  const scores = Object.fromEntries(classes.map((c, i) => [c, probs[i]]));
-  let group = out[labelName]?.data?.[0];
-  if (typeof group !== "string") group = classes[probs.indexOf(Math.max(...probs))];
-
-  return {
-    available: true,
-    group: String(group),
-    scores,
+  const coverage = {
     coverage: enc.called / enc.nFeatures,
     calledMarkers: enc.called,
     missingMarkers: enc.missing,
     incompatibleMarkers: enc.incompatible,
-    model: {
-      steps: meta.steps,
-      classes,
-      nFeatures: meta.n_features,
-      sha256: meta.artifacts?.["ancestry_pipeline.onnx"]?.sha256 || null,
-      trainingCohort: meta.training_cohort || null,
-    },
+    matchedMarkers: enc.matched,
+    nMarkers: enc.nFeatures,
+  };
+  const modelInfo = {
+    version: meta.model_version || null,
+    runId: meta.run_id || null,
+    classes: meta.classes,
+    nMarkers: meta.n_markers,
+    nComponents: meta.n_components,
+    sha256: meta.artifacts?.["model.onnx"]?.sha256 || null,
+  };
+
+  const requiredBuild = meta.required_build || "GRCh37";
+  if (parsed.build !== "Unknown" && parsed.build !== requiredBuild) {
+    return { available: true, status: "skipped", reason: `genome build ${parsed.build}; model requires ${requiredBuild}`, ...coverage, model: modelInfo };
+  }
+  const problem = coverageProblem(enc);
+  if (problem) return { available: true, status: "skipped", reason: problem, ...coverage, model: modelInfo };
+
+  const inputName = meta.input?.name || session.inputNames[0];
+  const out = await session.run({ [inputName]: new ort.Tensor("float32", enc.x, [1, enc.nFeatures]) });
+  const pick = (re, i) => out[session.outputNames.find((o) => re.test(o)) || session.outputNames[i]];
+  const probs = Array.from(pick(/prob/i, 0).data);
+  const pcTensor = out.pc_scores || out[session.outputNames.find((o) => /pc|pca|score/i.test(o) && !/prob/i.test(o))];
+  const classes = meta.classes;
+  const scores = Object.fromEntries(classes.map((c, i) => [c, probs[i]]));
+  const idx = out.label_index ? Number(out.label_index.data[0]) : probs.indexOf(Math.max(...probs));
+
+  return {
+    available: true,
+    status: "classified",
+    group: classes[idx],
+    scores,
+    pcScores: pcTensor ? Array.from(pcTensor.data) : null,
+    ...coverage,
+    model: modelInfo,
   };
 }
 

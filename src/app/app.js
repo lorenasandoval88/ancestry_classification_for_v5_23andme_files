@@ -2,7 +2,7 @@
 // Everything runs client-side: files are parsed in the browser and never uploaded.
 
 import { parse23andMe, genotypeClass, chromIndex } from "../sdk/parse23andme.js";
-import { classifyParsed, loadModel, modelStatus } from "../sdk/classifier.js";
+import { classifyParsed, loadModel, loadPcaReference, modelStatus } from "../sdk/classifier.js";
 
 const POPS = ["AFR", "AMR", "EAS", "EUR", "SAS"];
 
@@ -173,8 +173,8 @@ function clearAll() {
   renderAll();
 }
 
-// Runs the SDK classifier (model/ artifacts exported by scripts/export_onnx.py).
-// When the artifacts are not published yet the result is marked pending.
+// Runs the SDK classifier (model/ browser bundle from the cloud Step 6 export).
+// When the bundle is not published yet the result is marked pending.
 async function classify(p) {
   p.ancestry = { running: true };
   renderAll();
@@ -182,11 +182,16 @@ async function classify(p) {
     const r = await classifyParsed(p);
     if (!r.available) {
       p.ancestry = { pending: true };
-    } else if (p.build !== "GRCh37" && p.build !== "Unknown") {
-      p.ancestry = { error: `Unsupported build ${p.build}; the model expects GRCh37` };
+    } else if (r.status === "skipped") {
+      p.ancestry = { skipped: true, reason: r.reason, coverage: r.coverage, calledMarkers: r.calledMarkers, incompatibleMarkers: r.incompatibleMarkers };
+      pushStatus("warn", `<strong>${esc(p.fileName)}</strong>: not classified — ${esc(r.reason)}.`);
     } else {
       p.ancestry = r;
-      if (r.coverage < 0.8) pushStatus("warn", `<strong>${esc(p.fileName)}</strong>: only ${pct(r.coverage, 1)} of model markers called (${fmt.format(r.incompatibleMarkers)} incompatible). Result may be unreliable.`);
+      const cloud = p.cloudResult;
+      if (cloud) {
+        const agree = cloud.group === r.group;
+        pushStatus(agree ? "ok" : "warn", `<strong>${esc(p.fileName)}</strong>: browser → <span class="pop pop-${esc(r.group)}">${esc(r.group)}</span> (${pct(r.scores[r.group], 1)}, ${fmt.format(r.calledMarkers)} called) · cloud → <span class="pop pop-${esc(cloud.group)}">${esc(cloud.group)}</span> (${fmt.format(cloud.calledMarkers)} called) — ${agree ? "agree" : "DISAGREE"}`);
+      }
     }
   } catch (e) {
     p.ancestry = { error: e.message || String(e) };
@@ -200,16 +205,18 @@ function renderModelStatus() {
   const el = $("#modelStatus");
   if (!el) return;
   const { status, error, meta } = modelStatus();
+  const ready = meta ? `model ready · ${fmt.format(meta.n_markers)} markers · ${meta.n_components} PCs${meta.model_version ? ` · v${meta.model_version}` : ""}${meta.run_id ? ` · ${meta.run_id}` : ""}` : "model ready";
   const map = {
     idle: ["badge-sex-u", "fa-circle", "model not loaded"],
     loading: ["badge-pending", "fa-spinner fa-spin", "loading model…"],
-    ready: ["badge-pgp", "fa-circle-check", `model ready · ${meta?.steps?.join(" → ") || "ONNX"}`],
-    missing: ["badge-pending", "fa-clock", "model artifacts not published yet (run scripts/export_onnx.py)"],
+    ready: ["badge-pgp", "fa-circle-check", ready],
+    missing: ["badge-pending", "fa-clock", "model bundle not published yet (model/metadata.json missing)"],
     error: ["badge-sex-f", "fa-triangle-exclamation", `model error: ${error}`],
   };
   const [cls, icon, text] = map[status] || map.idle;
-  const sha = meta?.artifacts?.["ancestry_pipeline.onnx"]?.sha256;
-  el.innerHTML = `<span class="badge-soft ${cls}" ${sha ? `title="sha256 ${esc(sha)}"` : ""}><i class="fa-solid ${icon} me-1"></i>${esc(text)}</span>`;
+  const sha = meta?.artifacts?.["model.onnx"]?.sha256;
+  const parity = meta?.parity ? ` · parity ${meta.parity.passed ? "passed" : "FAILED"} (${meta.parity.rows} rows, max |Δp| ${meta.parity.max_abs_proba_diff?.toExponential(1)})` : "";
+  el.innerHTML = `<span class="badge-soft ${cls}" title="${sha ? `sha256 ${esc(sha)}` : ""}${esc(parity)}"><i class="fa-solid ${icon} me-1"></i>${esc(text)}</span>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +254,8 @@ function renderFileList() {
 function ancestryHtml(p) {
   if (!p.ancestry) return "";
   if (p.ancestry.running) return `<span class="badge-soft badge-pending"><i class="fa-solid fa-spinner fa-spin me-1"></i>classifying…</span>`;
-  if (p.ancestry.pending) return `<span class="badge-soft badge-pending" title="ONNX model artifacts not published yet"><i class="fa-regular fa-clock me-1"></i>model pending</span>`;
+  if (p.ancestry.pending) return `<span class="badge-soft badge-pending" title="ONNX model bundle not published yet"><i class="fa-regular fa-clock me-1"></i>model pending</span>`;
+  if (p.ancestry.skipped) return `<span class="badge-soft badge-pending" title="${esc(p.ancestry.reason)}"><i class="fa-solid fa-ban me-1"></i>not classified</span>`;
   if (p.ancestry.error) return `<span class="badge-soft badge-sex-f" title="${esc(p.ancestry.error)}"><i class="fa-solid fa-triangle-exclamation me-1"></i>failed</span>`;
   const g = p.ancestry.group;
   const s = p.ancestry.scores?.[g];
@@ -603,7 +611,163 @@ function renderPagination(ul, cur, pages) {
   ul.innerHTML = items.join("");
 }
 
-function renderAll() { renderFileList(); renderParticipants(); renderGenotypes(); }
+// ---------------------------------------------------------------------------
+// Rendering: PCA plot
+// ---------------------------------------------------------------------------
+
+const POP_COLORS = { AFR: "#d97706", AMR: "#dc2626", EAS: "#7c3aed", EUR: "#2563eb", SAS: "#059669" };
+const SOURCE_COLORS = { train: "#94a3b8", test: "#0f766e", v5_files: "#7c3aed", upload: "#dc2626" };
+const SOURCE_LABELS = { train: "1000G train", test: "1000G test", v5_files: "PGP v5 files", upload: "Uploads" };
+const LAYER_IDS = { train: "layerTrain", test: "layerTest", v5_files: "layerV5", upload: "layerUploads" };
+const PALETTE = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5", "#c49c94", "#f7b6d2", "#c7c7c7", "#dbdb8d", "#9edae5", "#393b79", "#637939", "#8c6d31", "#843c39", "#7b4173", "#3182bd"];
+
+const pca = { ref: undefined, x: 0, y: 1, colorBy: "group", drawn: false };
+
+/** Flatten reference groups + classified uploads into one point list. */
+function pcaPoints() {
+  const pts = [];
+  const groups = pca.ref?.groups || {};
+  for (const [source, g] of Object.entries(groups)) {
+    const n = g.scores?.length || 0;
+    for (let i = 0; i < n; i++) {
+      const known = g.labels?.[i] || null;
+      const predicted = g.predicted?.[i] || null;
+      pts.push({ source, id: g.ids?.[i] ?? `${source}-${i}`, scores: g.scores[i], known, predicted, pop: g.pops?.[i] || null, group: known || predicted });
+    }
+  }
+  for (const p of files) {
+    if (p.ancestry?.pcScores) {
+      pts.push({ source: "upload", id: p.label, fileName: p.fileName, scores: p.ancestry.pcScores, known: null, predicted: p.ancestry.group, pop: null, group: p.ancestry.group, prob: p.ancestry.scores?.[p.ancestry.group] });
+    }
+  }
+  return pts;
+}
+
+function pcaComponentCount(pts) {
+  return pca.ref?.n_components || (pts.length ? pts[0].scores.length : 0);
+}
+
+function pcaAxisLabel(i) {
+  const evr = pca.ref?.explained_variance_ratio;
+  return evr?.[i] != null ? `PC${i + 1} (${(evr[i] * 100).toFixed(1)}%)` : `PC${i + 1}`;
+}
+
+function renderPca() {
+  const plotEl = $("#pcaPlot"), empty = $("#pcaEmpty"), summary = $("#pcaSummary"), footer = $("#pcaFooter");
+  if (!plotEl) return;
+  const pts = pcaPoints();
+  const k = pcaComponentCount(pts);
+
+  if (!pts.length || typeof Plotly === "undefined") {
+    if (pca.drawn) { Plotly.purge(plotEl); pca.drawn = false; }
+    plotEl.innerHTML = ""; summary.innerHTML = ""; footer.textContent = "";
+    empty.classList.remove("hidden");
+    $("#pcaEmptyMsg").innerHTML = typeof Plotly === "undefined" ? "Plotly failed to load."
+      : pca.ref === undefined ? "Loading PCA reference…"
+      : "No PCA coordinates yet. Publish <code>model/pca_reference.json</code> from the cloud run for the reference people, and/or classify an uploaded file (the model returns its PC scores).";
+    return;
+  }
+  empty.classList.add("hidden");
+
+  // Axis selectors (rebuild only when the component count changes).
+  const xs = $("#pcaX"), ys = $("#pcaY");
+  if (xs.options.length !== k) {
+    const opts = Array.from({ length: k }, (_, i) => `<option value="${i}">${pcaAxisLabel(i)}</option>`).join("");
+    xs.innerHTML = opts; ys.innerHTML = opts;
+    pca.x = Math.min(pca.x, k - 1); pca.y = Math.min(pca.y, k - 1);
+    xs.value = pca.x; ys.value = pca.y;
+  }
+
+  const visible = Object.fromEntries(Object.entries(LAYER_IDS).map(([s, id]) => [s, $(`#${id}`)?.checked ?? true]));
+  const shown = pts.filter((p) => visible[p.source]);
+
+  // Group points into traces by (source, colour key).
+  const colorKey = (p) => pca.colorBy === "pop" ? (p.pop || p.group || "—") : pca.colorBy === "source" ? p.source : (p.group || "—");
+  const popIndex = {};
+  const traces = new Map();
+  for (const p of shown) {
+    const key = colorKey(p);
+    const tkey = `${p.source}|${key}`;
+    if (!traces.has(tkey)) {
+      let color;
+      if (pca.colorBy === "source") color = SOURCE_COLORS[p.source];
+      else if (pca.colorBy === "pop" && p.pop) { if (popIndex[key] == null) popIndex[key] = Object.keys(popIndex).length; color = PALETTE[popIndex[key] % PALETTE.length]; }
+      else color = POP_COLORS[key] || "#64748b";
+      const isUpload = p.source === "upload", isTrain = p.source === "train";
+      traces.set(tkey, {
+        type: "scattergl", mode: "markers",
+        name: `${SOURCE_LABELS[p.source]} · ${key}`,
+        legendgroup: p.source, legendgrouptitle: { text: SOURCE_LABELS[p.source] },
+        x: [], y: [], text: [], customdata: [],
+        hovertemplate: "%{text}<extra></extra>",
+        marker: {
+          color,
+          size: isUpload ? 18 : isTrain ? 6 : 9,
+          symbol: isUpload ? "star" : p.source === "test" ? "diamond" : p.source === "v5_files" ? "square" : "circle",
+          opacity: isTrain ? 0.45 : 0.9,
+          line: isUpload ? { width: 2, color: "#0b1220" } : p.source === "test" ? { width: 1, color: "#ffffff" } : { width: 0 },
+        },
+      });
+    }
+    const t = traces.get(tkey);
+    t.x.push(p.scores[pca.x]); t.y.push(p.scores[pca.y]);
+    const parts = [`<b>${esc(p.id)}</b>`, SOURCE_LABELS[p.source]];
+    if (p.pop) parts.push(`population ${esc(p.pop)}`);
+    if (p.known) parts.push(`known group ${p.known}`);
+    if (p.predicted) parts.push(`predicted ${p.predicted}${p.prob != null ? ` (${pct(p.prob, 1)})` : ""}`);
+    if (p.known && p.predicted && p.known !== p.predicted) parts.push("<b>misclassified</b>");
+    parts.push(`${pcaAxisLabel(pca.x)} = ${p.scores[pca.x].toFixed(2)}, ${pcaAxisLabel(pca.y)} = ${p.scores[pca.y].toFixed(2)}`);
+    t.text.push(parts.join("<br>"));
+    t.customdata.push([p.source, p.id, p.pop || "", p.known || "", p.predicted || ""]);
+  }
+
+  // Draw order: train (background) → test → v5 → uploads (foreground).
+  const order = { train: 0, test: 1, v5_files: 2, upload: 3 };
+  const data = [...traces.values()].sort((a, b) => order[a.legendgroup] - order[b.legendgroup] || a.name.localeCompare(b.name));
+
+  const layout = {
+    margin: { l: 60, r: 20, t: 20, b: 55 },
+    xaxis: { title: { text: pcaAxisLabel(pca.x) }, zeroline: false, gridcolor: "#eef2f7" },
+    yaxis: { title: { text: pcaAxisLabel(pca.y) }, zeroline: false, gridcolor: "#eef2f7", scaleanchor: "x", scaleratio: 1 },
+    legend: { orientation: "v", x: 1.01, y: 1, groupclick: "toggleitem", font: { size: 11 } },
+    hovermode: "closest", plot_bgcolor: "#ffffff", paper_bgcolor: "#ffffff",
+    font: { family: getComputedStyle(document.body).fontFamily, color: "#0f172a" },
+    annotations: shown.filter((p) => p.source === "upload").map((p) => ({
+      x: p.scores[pca.x], y: p.scores[pca.y], text: esc(p.id), showarrow: true, arrowhead: 0, ax: 0, ay: -28,
+      font: { size: 11, color: "#0b1220" }, bgcolor: "rgba(255,255,255,.85)", bordercolor: POP_COLORS[p.group] || "#0b1220", borderwidth: 1, borderpad: 3,
+    })),
+  };
+  const config = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"], toImageButtonOptions: { filename: "ancestry_pca", scale: 2 } };
+  Plotly.react(plotEl, data, layout, config);
+  pca.drawn = true;
+
+  // Summary strip
+  const bySource = {};
+  for (const p of shown) bySource[p.source] = (bySource[p.source] || 0) + 1;
+  const testPts = shown.filter((p) => p.source === "test" && p.known && p.predicted);
+  const correct = testPts.filter((p) => p.known === p.predicted).length;
+  summary.innerHTML = Object.entries(SOURCE_LABELS).map(([s, label]) => `<div class="mini-stat"><span class="v">${fmt.format(bySource[s] || 0)}</span><span class="k">${label}</span></div>`).join("")
+    + (testPts.length ? `<div class="mini-stat"><span class="v">${correct} / ${testPts.length}</span><span class="k">test correct</span></div>` : "")
+    + (k ? `<div class="mini-stat"><span class="v">${k}</span><span class="k">components</span></div>` : "");
+  const evr = pca.ref?.explained_variance_ratio;
+  footer.textContent = `${fmt.format(shown.length)} points · circles = 1000G train (known label), diamonds = 1000G test (known label), squares = PGP v5 files (predicted), stars = your uploads (predicted)` + (evr?.length ? ` · PC1–${k} explain ${(evr.slice(0, k).reduce((a, b) => a + b, 0) * 100).toFixed(1)}% of variance` : "");
+}
+
+function pcaDownloadCsv() {
+  const pts = pcaPoints();
+  if (!pts.length) return;
+  const k = pcaComponentCount(pts);
+  downloadCsv("ancestry_pca_coordinates.csv",
+    ["source", "id", "population", "known_group", "predicted_group", ...Array.from({ length: k }, (_, i) => `PC${i + 1}`)],
+    pts.map((p) => [SOURCE_LABELS[p.source], p.id, p.pop || "", p.known || "", p.predicted || "", ...p.scores.map((v) => v.toFixed(4))]));
+}
+
+async function initPca() {
+  pca.ref = await loadPcaReference();
+  renderPca();
+}
+
+function renderAll() { renderFileList(); renderParticipants(); renderGenotypes(); renderPca(); }
 
 // ---------------------------------------------------------------------------
 // Wiring
@@ -716,10 +880,23 @@ function init() {
       idx.map((i) => [p.rsid[i], p.chrom[i], p.pos[i], p.genotype[i], genotypeClass(p.genotype[i])]));
   });
 
+  // PCA
+  $("#pcaX").addEventListener("change", (e) => { pca.x = Number(e.target.value); renderPca(); });
+  $("#pcaY").addEventListener("change", (e) => { pca.y = Number(e.target.value); renderPca(); });
+  $("#pcaColorBy").addEventListener("change", (e) => { pca.colorBy = e.target.value; renderPca(); });
+  Object.values(LAYER_IDS).forEach((id) => $(`#${id}`).addEventListener("change", renderPca));
+  $("#pcaDownloadBtn").addEventListener("click", pcaDownloadCsv);
+  // Plotly sizes itself to the container; redraw when the tab becomes visible.
+  $("#tab-pca").addEventListener("shown.bs.tab", () => { if (pca.drawn) Plotly.Plots.resize($("#pcaPlot")); else renderPca(); });
+
   renderAll();
   loadCatalog();
   renderModelStatus();
   loadModel().catch(() => {}).finally(renderModelStatus);
+  initPca();
+
+  // Console/debug handle (e.g. AncestryApp.files[0].ancestry).
+  globalThis.AncestryApp = { files, classify, renderAll, renderPca, modelStatus };
 }
 
 document.addEventListener("DOMContentLoaded", init);

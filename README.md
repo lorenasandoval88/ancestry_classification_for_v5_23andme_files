@@ -20,10 +20,10 @@ The same model can be used two ways:
 | Step | Action for a 23andMe file |
 |------|---------------------------|
 | Validate | Confirm a supported chip (23andMe v5) and genome build (GRCh37); record missing calls and incompatible alleles |
-| Encode | Align the file to the fixed panel of **335,632 ancestry markers** (`chr:pos:ref:alt`, GRCh37) and count the **REF allele** at each: 0, 1 or 2 — the same encoding as PLINK `--export A` used in training |
-| Impute | Fill markers that are absent, no-call, or carry alleles outside {REF, ALT} with the saved **training means** (the fitted `SimpleImputer` statistics). This happens upstream, in JavaScript |
-| Classify | Run the exported ONNX graph — `StandardScaler → PCA(10) → LogisticRegression` — in the browser with `onnxruntime-web` |
-| Report | Return the AFR / AMR / EAS / EUR / SAS assignment, per-group probabilities, marker coverage (called / missing / incompatible counts) and model checksum as separate fields |
+| Encode | Align the file to the model's fixed marker panel (`chr:pos:ref:alt`, GRCh37) and count the **REF allele** at each: 0, 1 or 2 — the same encoding as PLINK `--export A` used in training. Markers that are absent, no-call, allele-incompatible or conflicting duplicates become `NaN` |
+| Coverage check | Require ≥ 90 % of model markers called and ≤ 1 % incompatible alleles among matched coordinates (rules come from `metadata.json`); otherwise return a reason instead of a group |
+| Classify | Run the exported ONNX graph in the browser with `onnxruntime-web`: mean-fill `NaN` → scale → PCA → logistic regression → softmax. Imputation happens **inside the graph** with the fitted training means |
+| Report | Return the AFR / AMR / EAS / EUR / SAS assignment, per-group probabilities, **PC scores**, marker coverage (called / missing / incompatible counts) and model version / checksum as separate fields |
 
 New files never trigger retraining. Every stage uses a frozen marker order, allele coding,
 preprocessing parameters, and model version.
@@ -66,29 +66,35 @@ see `data/training_model/cloudModel/train_ancestry.py`) is exported to ONNX and 
 agreement with the Python outputs so that the npm package and web app produce the same result
 as the original model.
 
-### Exporting the model for the browser
+### Browser model bundle (`model/`)
 
-`model.joblib` can only be read by Python + scikit-learn, so the export runs once in the
-training environment (sklearn 1.7.2) and the resulting artifacts are committed under `model/`:
-
-```sh
-pip install skl2onnx onnx onnxruntime numpy pandas joblib
-python scripts/export_onnx.py \
-  --model data/training_model/cloudModel/model.joblib \
-  --markers "data/training_model/cloudModel/*_selected_markers.tsv" \
-  --out model
-```
+The cloud workflow's Step 6 exports the fitted pipeline to ONNX and verifies it against Python
+(identical labels, max |Δp| ≤ 1e-4 on the 501 test people). The web app and SDK consume that
+release bundle from `model/`:
 
 | Artifact | Contents |
 |----------|----------|
-| `model/ancestry_pipeline.onnx` | `StandardScaler → PCA(10) → LogisticRegression` (imputer removed; zipmap disabled) |
-| `model/markers.tsv` | `variant_id` + `counted_allele` (REF) in model feature order |
-| `model/means.f32` | float32 little-endian training mean per marker, used for upstream imputation |
-| `model/model_meta.json` | classes, feature count, steps, SHA-256 of every artifact, parity-check result |
+| `model/model.onnx` | Graph: `IsNaN → Where(train_means) → Sub/Div (scaler) → Sub (PCA mean) → MatMul (components) → Gemm (logistic) → Softmax → ArgMax`. Input `dosages[N, n_markers]` float32 (0/1/2, `NaN` = missing). Outputs `probabilities[N, 5]`, **`pc_scores[N, k]`**, `label_index[N]` |
+| `model/markers.json` | `{ n_markers, counted_allele: "REF", markers: ["chr:pos:ref:alt", …] }` in model column order |
+| `model/metadata.json` | `classes` (AFR, AMR, EAS, EUR, SAS), `n_markers`, `n_components`, `coverage_rules`, `model_version`, `run_id`, SHA-256 of each artifact, parity result |
+| `model/pca_reference.json` *(optional)* | PC scores of the reference people for the PCA plot: `groups.train` (2,003, known labels), `groups.test` (501, known + predicted), `groups.v5_files` (74 PGP files, predicted), plus `explained_variance_ratio` |
 
-Until these files exist the web app shows **"model pending"** and still parses/inspects files.
-Pass `--parity X.npy` (an `(n, 335632)` float32 dosage matrix, e.g. the 501 test people) to
-compare ONNX against scikit-learn on real data; the script falls back to synthetic rows.
+[`scripts/export_onnx.py`](./scripts/export_onnx.py) is a reference implementation of this
+contract (hand-built ONNX graph with `onnx.helper`, no skl2onnx). The cloud exporter can mirror
+it; the key additions over a plain classifier export are the extra **`pc_scores` output** and the
+`pca_reference.json` file, which together power the PCA tab:
+
+```sh
+python scripts/export_onnx.py --model 5_fit_pca_and_classifier/model.joblib --out model \
+  --cohort data/reference_cohort.json \
+  --train-matrix X_train.npy --train-ids train2003.txt \
+  --test-matrix  X_test.npy  --test-ids  test501.txt \
+  --v5-matrix    X_v5.npy    --v5-ids    v5_files.txt \
+  --run-id my23-20261028-153511 --model-version 1.0.1
+```
+
+Until `model/metadata.json` exists the web app shows **"model bundle not published yet"** and
+still parses, inspects and tabulates files.
 
 ## Installation (SDK)
 
@@ -102,17 +108,21 @@ import { classifyAncestry } from "ancestry-classification-for-v5-23andme-files";
 const text = await file.text(); // raw 23andMe v5 export
 const result = await classifyAncestry(text);
 
+result.status;             // "classified" | "skipped" (see result.reason) 
 result.group;              // e.g. "EUR"
 result.scores;             // { AFR: 0.01, AMR: 0.03, EAS: 0.00, EUR: 0.95, SAS: 0.01 }
-result.coverage;           // fraction of the 335,632 markers called in the file
+result.pcScores;           // [PC1, PC2, …] — the file's coordinates on the saved PCA
+result.coverage;           // fraction of model markers called in the file
 result.calledMarkers;      // 332847
-result.incompatibleMarkers;// markers whose alleles were not {REF, ALT} (filled with the mean)
-result.model.sha256;       // checksum of ancestry_pipeline.onnx
+result.incompatibleMarkers;// markers whose alleles were not {REF, ALT} (imputed in-graph)
+result.model.version;      // from metadata.json
+result.model.sha256;       // checksum of model.onnx
 ```
 
 Lower-level pieces are exported too: `parse23andMe(text)`, `encodeDosages(parsed)`,
-`loadModel()`, `modelStatus()` and `configure({ modelBase })` to point at a different
-artifact location. Source: `src/sdk/`.
+`coverageProblem(encoded)`, `loadModel()`, `loadPcaReference()`, `modelStatus()` and
+`configure({ modelBase, ortCdn })` to point at a different bundle location or a vendored
+`onnxruntime-web`. Source: `src/sdk/`.
 
 ## Web app
 
@@ -121,7 +131,7 @@ Open the web app, select your 23andMe raw-data file, and the page shows the clos
 locally in the browser.
 
 The landing page lives in [`index.html`](./index.html) (styles in `src/css/`, logic in
-`src/app/app.js`) and has three tabs:
+`src/app/app.js`) and has four tabs:
 
 1. **Upload & Classify** – drag-and-drop or browse for one or more `.txt` exports, or press **Try a demo file**
    to load the bundled real 23andMe v5 export (`data/demo_genotype_file/genome_23.txt`, 631,455 variants).
@@ -136,6 +146,12 @@ The landing page lives in [`index.html`](./index.html) (styles in `src/css/`, lo
    - **Uploaded** – files you load in the Upload tab.
    Includes per-group counts for known vs. predicted labels, pagination and CSV export.
 3. **Inspect Genotypes** – paginated genotype table with rsID / position search, chromosome and genotype-class filters, column sorting and CSV export.
+4. **PCA Plot** – every person projected onto the model's saved principal components (Plotly, WebGL).
+   Layers: 1000G train (2,003, translucent circles, known label), 1000G test (501, diamonds, known label —
+   hover shows the prediction and flags misclassifications), PGP v5 files (74, squares, predicted) and your
+   uploads (large labelled stars, from the model's `pc_scores` output). Choose any PCx / PCy pair, colour by
+   reference group, 1000G population or data source, toggle layers, and download the coordinates as CSV.
+   Requires `model/pca_reference.json` for the reference layers.
 
 ### Data
 
@@ -152,7 +168,7 @@ The landing page lives in [`index.html`](./index.html) (styles in `src/css/`, lo
 | `data/training_model/cloudModel/*_selected_markers.tsv` | The 335,632 model markers (`chr:pos:ref:alt`) and the counted (REF) allele |
 | `data/training_model/cloudModel/*_training_summary.json` | Training provenance (cohort, CV accuracy 0.996, hashes) |
 | `data/training_model/cloudModel/cloud_instructions_steps/*.docx` | Plan for the single-model seven-step cloud workflow summarised in *How the model was built* |
-| `model/` (generated) | Browser artifacts from `scripts/export_onnx.py` — see *Exporting the model* above |
+| `model/` (published from the cloud run) | Browser model bundle: `model.onnx`, `markers.json`, `metadata.json`, optional `pca_reference.json` — see *Browser model bundle* above |
 
 Regenerate the slim catalog and the reference cohort after updating the inputs:
 
@@ -168,8 +184,9 @@ npx http-server -p 8080
 ```
 
 The Classify buttons call the SDK in `src/sdk/classifier.js`, which loads `model/` on demand.
-Until the ONNX artifacts are exported, the Upload tab shows a *model artifacts not published yet*
-badge and classification results read "model pending".
+Until the bundle is published, the Upload tab shows a *model bundle not published yet* badge and
+classification results read "model pending". Once it is, the demo file's status line compares the
+browser result with the cloud Step 7 result for the same file (group and called-marker count).
 
 ## Interpreting the result
 

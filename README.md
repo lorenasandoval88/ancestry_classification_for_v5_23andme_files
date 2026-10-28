@@ -93,11 +93,11 @@ compare ONNX against scikit-learn on real data; the script falls back to synthet
 ## Installation (SDK)
 
 ```sh
-npm install ancestry-classification-for-23andme
+npm install ancestry-classification-for-v5-23andme-files
 ```
 
 ```js
-import { classifyAncestry } from "ancestry-classification-for-23andme";
+import { classifyAncestry } from "ancestry-classification-for-v5-23andme-files";
 
 const text = await file.text(); // raw 23andMe v5 export
 const result = await classifyAncestry(text);

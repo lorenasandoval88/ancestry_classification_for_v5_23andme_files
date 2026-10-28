@@ -1,5 +1,5 @@
 {
-  "name": "ancestry-classification-for-23andme",
+  "name": "ancestry-classification-for-v5-23andme-files",
   "version": "0.1.0",
   "description": "SDK and web app to classify 23andMe raw-data files into a 1000 Genomes ancestry reference group (AFR, AMR, EAS, EUR, SAS).",
   "type": "module",

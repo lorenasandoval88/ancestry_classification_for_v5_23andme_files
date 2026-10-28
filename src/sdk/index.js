@@ -1,6 +1,6 @@
 // Public SDK entry point.
 //
-//   import { classifyAncestry, parse23andMe } from "ancestry-classification-for-23andme";
+//   import { classifyAncestry, parse23andMe } from "ancestry-classification-for-v5-23andme-files";
 //   const result = await classifyAncestry(await file.text());
 //   result.group;     // "EUR"
 //   result.scores;    // { AFR, AMR, EAS, EUR, SAS }

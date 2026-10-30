@@ -1,0 +1,7 @@
+{
+  "max_probability_absolute_difference": 4.4031827783896915e-07,
+  "people_compared": 501,
+  "runtime": "Python ONNX Runtime; actual browser compatibility is a separate check",
+  "same_predicted_labels": true,
+  "tolerance": 0.0001
+}

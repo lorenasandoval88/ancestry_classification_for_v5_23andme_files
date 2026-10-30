@@ -1,0 +1,22 @@
+{
+  "classes": [
+    "AFR",
+    "AMR",
+    "EAS",
+    "EUR",
+    "SAS"
+  ],
+  "feature_count": 335663,
+  "genome_build": "37",
+  "input_name": "genotypes",
+  "interpretation": "Broad reference-group classification; probabilities are not ancestry mixture percentages or clinical risk.",
+  "markers_sha256": "d51626d388ccf4de9b390a4a3dc3d33d348d40b865ebba94f6cd367d8478b5ae",
+  "maximum_incompatible_fraction": 0.01,
+  "minimum_called_fraction": 0.9,
+  "model_name": "my23_v5_ancestry_model",
+  "model_sha256": "2f2c04825bd9f78b9897a9bdef90ddb0fc64e270ea450ecb79bb33cf9db2fdec",
+  "probabilities_output": "probabilities",
+  "run_id": "my23-20261028-154934",
+  "schema_version": 1,
+  "training_people": 2003
+}

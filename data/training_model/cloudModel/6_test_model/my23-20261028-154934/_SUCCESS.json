@@ -1,0 +1,68 @@
+{
+  "complete": true,
+  "config_sha256": "6bb207f2b378ba8fd56285b56c1e1df4e77d11aa0eff1fe7ee15295b57d6ca6c",
+  "objects": {
+    "gs://all23_0710/ancestry/my23_v5_ancestry_model/6_test_model/results/my23-20261028-154934/artifacts.zip": {
+      "crc32c": "CLTGTA==",
+      "generation": "1793216674340290",
+      "md5Hash": "Qr84LgREF9GRUUAAV2bHEg==",
+      "size": "18234545"
+    },
+    "gs://all23_0710/ancestry/my23_v5_ancestry_model/6_test_model/results/my23-20261028-154934/browser/markers.json": {
+      "crc32c": "qAoZ8w==",
+      "generation": "1793216698680479",
+      "md5Hash": "5DFlpMZWnQFbRHgzYsto0g==",
+      "size": "7266881"
+    },
+    "gs://all23_0710/ancestry/my23_v5_ancestry_model/6_test_model/results/my23-20261028-154934/browser/metadata.json": {
+      "crc32c": "EkTkDA==",
+      "generation": "1793216703018594",
+      "md5Hash": "V4BZH3NgOZnBOdoH0AQXhg==",
+      "size": "707"
+    },
+    "gs://all23_0710/ancestry/my23_v5_ancestry_model/6_test_model/results/my23-20261028-154934/browser/model.onnx": {
+      "crc32c": "iyijsQ==",
+      "generation": "1793216695440277",
+      "md5Hash": "OSx0JLquUiznByebjygo6Q==",
+      "size": "18798117"
+    },
+    "gs://all23_0710/ancestry/my23_v5_ancestry_model/6_test_model/results/my23-20261028-154934/by_actual_group.tsv": {
+      "crc32c": "Ii1DiA==",
+      "generation": "1793216683006458",
+      "md5Hash": "NXr8iW+hz+T/gOb+9QbF9w==",
+      "size": "126"
+    },
+    "gs://all23_0710/ancestry/my23_v5_ancestry_model/6_test_model/results/my23-20261028-154934/by_population.tsv": {
+      "crc32c": "xps5GQ==",
+      "generation": "1793216685955168",
+      "md5Hash": "P04VdzEGQh9UBfiiorpZBg==",
+      "size": "402"
+    },
+    "gs://all23_0710/ancestry/my23_v5_ancestry_model/6_test_model/results/my23-20261028-154934/confusion_matrix.tsv": {
+      "crc32c": "0Bxd+g==",
+      "generation": "1793216680099624",
+      "md5Hash": "mcpdS+qfTcwa7YC7bCOEjQ==",
+      "size": "110"
+    },
+    "gs://all23_0710/ancestry/my23_v5_ancestry_model/6_test_model/results/my23-20261028-154934/onnx_parity.json": {
+      "crc32c": "c11PUA==",
+      "generation": "1793216691968409",
+      "md5Hash": "f8GIbZ0wuD4fQTZpvub+gQ==",
+      "size": "236"
+    },
+    "gs://all23_0710/ancestry/my23_v5_ancestry_model/6_test_model/results/my23-20261028-154934/predictions.tsv": {
+      "crc32c": "jBDf/Q==",
+      "generation": "1793216677267484",
+      "md5Hash": "nLD7a+dXGVllkORT1Lfkkg==",
+      "size": "65397"
+    },
+    "gs://all23_0710/ancestry/my23_v5_ancestry_model/6_test_model/results/my23-20261028-154934/test_summary.json": {
+      "crc32c": "u8owYw==",
+      "generation": "1793216688955044",
+      "md5Hash": "6/i+YMpAiTFw3gC4vQpGWg==",
+      "size": "480"
+    }
+  },
+  "run_id": "my23-20261028-154934",
+  "step": 6
+}

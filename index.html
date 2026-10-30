@@ -61,7 +61,7 @@
             <span class="pop-badges">
               <span class="pop pop-AFR">AFR</span><span class="pop pop-AMR">AMR</span><span class="pop pop-EAS">EAS</span><span class="pop pop-EUR">EUR</span><span class="pop pop-SAS">SAS</span>
             </span>
-            — using a fixed panel of 335,632 markers, 10 principal components and a frozen classifier.
+            — using a fixed panel of 335,663 markers, 10 principal components and a frozen classifier.
           </p>
           <div class="d-flex flex-wrap gap-2 mt-4">
             <button id="heroUploadBtn" class="btn btn-primary btn-lg px-4" type="button">
@@ -78,7 +78,7 @@
         </div>
         <div class="col-lg-5">
           <div class="stat-grid">
-            <div class="stat"><div class="stat-value">335,632</div><div class="stat-label">ancestry markers</div></div>
+            <div class="stat"><div class="stat-value">335,663</div><div class="stat-label">ancestry markers</div></div>
             <div class="stat"><div class="stat-value">10</div><div class="stat-label">principal components</div></div>
             <div class="stat"><div class="stat-value">2,003 / 501</div><div class="stat-label">training / test cohort</div></div>
             <div class="stat"><div class="stat-value">500 / 501</div><div class="stat-label">test labels correct</div></div>
@@ -167,7 +167,7 @@
                   <li><span class="pipe-step">Validate</span> chip version, genome build (GRCh37), missing calls</li>
                   <li><span class="pipe-step">Encode</span> count the REF allele (0/1/2) at each model marker; missing or incompatible → NaN</li>
                   <li><span class="pipe-step">Check coverage</span> ≥ 90 % of markers called, ≤ 1 % incompatible alleles</li>
-                  <li><span class="pipe-step">Classify</span> ONNX in-browser: mean-fill → scale → PCA → logistic regression (also returns PC scores)</li>
+                  <li><span class="pipe-step">Classify</span> ONNX in-browser (SHA-256-verified bundle, pinned ONNX Runtime Web 1.22): mean-fill → scale → PCA → logistic regression → group probabilities</li>
                 </ol>
               </div>
             </div>
@@ -177,14 +177,14 @@
         <!-- ---------- Tab 2: Participants ---------- -->
         <section class="tab-pane fade" id="pane-participants" role="tabpanel" aria-labelledby="tab-participants">
           <div class="panel">
-            <div class="panel-header flex-wrap gap-2">
+            <div class="panel-header flex-column align-items-stretch gap-3">
               <div>
-                <h2 class="panel-title">Participants, reference cohort &amp; genotype files</h2>
+                <h2 class="panel-title">Explore participants and genotype files</h2>
                 <p class="panel-sub">
-                  The <strong>1000 Genomes</strong> people used to train (2,003) and test (501) the classifier, with their <em>known</em> super-population labels
-                  (from <code>data/reference_cohort.json</code>); public <a href="https://my.pgp-hms.org/" target="_blank" rel="noopener">Personal Genome Project</a> participants with 23andMe files
-                  (<code>data/participants_catalog.json</code>); and any files you upload. One row per person or file.
-                  Self-reported sex, race and ethnicity come from PGP surveys and are shown separately from the predicted reference group.
+                  Browse the 2,003 training and 501 test people from <strong>1000 Genomes</strong>, plus public
+                  <a href="https://my.pgp-hms.org/" target="_blank" rel="noopener">Personal Genome Project</a> participants and their files.
+                  1000 Genomes groups are <em>known</em> reference labels. Groups shown for 23andMe files are model predictions;
+                  self-reported race and ethnicity appear separately.
                 </p>
               </div>
               <div class="toolbar">
@@ -192,13 +192,15 @@
                   <i class="fa-solid fa-magnifying-glass"></i>
                   <input id="participantSearch" type="search" class="form-control form-control-sm" placeholder="HG00096, huA08F4D, GBR, file name…" aria-label="Search participants" />
                 </div>
-                <select id="participantSourceFilter" class="form-select form-select-sm" aria-label="Filter by source">
-                  <option value="">All sources</option>
+                <select id="participantSourceFilter" class="form-select form-select-sm" aria-label="Filter by dataset">
+                  <option value="">All datasets</option>
                   <option value="1000G train">1000G train (2,003)</option>
                   <option value="1000G test">1000G test (501)</option>
                   <option value="PGP">PGP catalog</option>
                   <option value="Upload">Uploaded</option>
                 </select>
+              </div>
+              <div class="toolbar">
                 <select id="participantChipFilter" class="form-select form-select-sm" aria-label="Filter by chip version">
                   <option value="">All chips</option>
                 </select>
@@ -214,15 +216,15 @@
                   <option value="SAS">SAS</option>
                   <option value="__none">Not classified</option>
                 </select>
-                <select id="participantSexFilter" class="form-select form-select-sm" aria-label="Filter by sex">
-                  <option value="">Any sex</option>
-                </select>
                 <select id="participantValidFilter" class="form-select form-select-sm" aria-label="Filter by file validity">
                   <option value="">All files</option>
                   <option value="valid">Valid 23andMe only</option>
                   <option value="invalid">Invalid / unsupported</option>
                 </select>
-                <select id="participantPageSize" class="form-select form-select-sm" aria-label="Rows per page">
+                <select id="participantSexFilter" class="form-select form-select-sm" aria-label="Filter by sex">
+                  <option value="">Any sex</option>
+                </select>
+                <select id="participantPageSize" class="form-select form-select-sm ms-auto" aria-label="Rows per page">
                   <option value="25">25 rows</option>
                   <option value="50" selected>50 rows</option>
                   <option value="100">100 rows</option>
@@ -430,6 +432,17 @@ r.scores;  // { AFR, AMR, EAS, EUR, SAS }</code></pre>
                   <li><strong>AMR</strong> denotes the admixed American reference populations, not an Indigenous American label.</li>
                   <li>Genetic group assignment is separate from self-reported race and ethnicity.</li>
                   <li>Files that fail input checks return a reason and no classification.</li>
+                </ul>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="info-card">
+                <i class="fa-solid fa-database"></i>
+                <h3>Data sources</h3>
+                <ul class="mb-0">
+                  <li>The 1000 Genomes people used to train (2,003) and test (501) the classifier carry <em>known</em> super-population labels from <code>data/reference_cohort.json</code>.</li>
+                  <li>Public Personal Genome Project participants with 23andMe files come from <code>data/participants_catalog.json</code>, alongside any files you upload. One row per person or file.</li>
+                  <li>Self-reported sex, race and ethnicity come from PGP surveys and are shown separately from the predicted reference group.</li>
                 </ul>
               </div>
             </div>

@@ -2,7 +2,7 @@
 // Everything runs client-side: files are parsed in the browser and never uploaded.
 
 import { parse23andMe, genotypeClass, chromIndex } from "../sdk/parse23andme.js";
-import { classifyParsed, loadModel, loadPcaReference, modelStatus } from "../sdk/classifier.js";
+import { classifyParsed, configure, loadModel, loadPcaReference, modelStatus } from "../sdk/classifier.js";
 
 const POPS = ["AFR", "AMR", "EAS", "EUR", "SAS"];
 
@@ -24,13 +24,15 @@ function defaultLabel(fileName) {
 // Demo data
 // ---------------------------------------------------------------------------
 
-// Real, anonymised 23andMe v5 export bundled with the repo. The cloud pipeline's
-// result for this exact file (from the PGP catalog) is shown so users can compare.
+// Real, anonymised 23andMe v5 export bundled with the repo. The reference result for this
+// exact file under the published model run (my23-20261028-154934, 335,663 markers) is shown so
+// users can compare; it was produced with that run's release classifier.mjs. The earlier cloud
+// run apply-v5-20261027-183800 (335,632 markers) also gave AMR with 332,847 called markers.
 const DEMO = {
   url: "data/demo_genotype_file/genome_23.txt",
   fileName: "genome_23.txt",
   label: "Demo participant (real v5 export)",
-  cloud: { group: "AMR", calledMarkers: 332847, calledFraction: 0.9917, runId: "apply-v5-20261027-183800" },
+  cloud: { group: "AMR", calledMarkers: 332878, nMarkers: 335663, calledFraction: 0.9917, runId: "my23-20261028-154934" },
 };
 
 async function loadDemoFile() {
@@ -48,7 +50,7 @@ async function loadDemoFile() {
     p.label = DEMO.label;
     p.cloudResult = DEMO.cloud;
     addParsed(p);
-    pushStatus("info", `Demo file: cloud pipeline result for this file was <span class="pop pop-${DEMO.cloud.group}">${DEMO.cloud.group}</span> with ${fmt.format(DEMO.cloud.calledMarkers)} of 335,632 model markers called (${pct(DEMO.cloud.calledFraction, 1)}) — run <em>Classify</em> to compare.`);
+    pushStatus("info", `Demo file: reference result for this file was <span class="pop pop-${DEMO.cloud.group}">${DEMO.cloud.group}</span> with ${fmt.format(DEMO.cloud.calledMarkers)} of ${fmt.format(DEMO.cloud.nMarkers)} model markers called (${pct(DEMO.cloud.calledFraction, 1)}) — run <em>Classify</em> to compare.`);
   } catch (e) {
     pushStatus("warn", `Could not load the bundled demo file (${esc(e.message)}); using a small synthetic file instead.`);
     const n = files.filter((f) => f.fileName.startsWith("genome_Demo_")).length + 1;
@@ -190,7 +192,7 @@ async function classify(p) {
       const cloud = p.cloudResult;
       if (cloud) {
         const agree = cloud.group === r.group;
-        pushStatus(agree ? "ok" : "warn", `<strong>${esc(p.fileName)}</strong>: browser → <span class="pop pop-${esc(r.group)}">${esc(r.group)}</span> (${pct(r.scores[r.group], 1)}, ${fmt.format(r.calledMarkers)} called) · cloud → <span class="pop pop-${esc(cloud.group)}">${esc(cloud.group)}</span> (${fmt.format(cloud.calledMarkers)} called) — ${agree ? "agree" : "DISAGREE"}`);
+        pushStatus(agree ? "ok" : "warn", `<strong>${esc(p.fileName)}</strong>: browser → <span class="pop pop-${esc(r.group)}">${esc(r.group)}</span> (${pct(r.scores[r.group], 1)}, ${fmt.format(r.calledMarkers)} called) · reference → <span class="pop pop-${esc(cloud.group)}">${esc(cloud.group)}</span> (${fmt.format(cloud.calledMarkers)} called) — ${agree ? "agree" : "DISAGREE"}`);
       }
     }
   } catch (e) {
@@ -205,7 +207,10 @@ function renderModelStatus() {
   const el = $("#modelStatus");
   if (!el) return;
   const { status, error, meta } = modelStatus();
-  const ready = meta ? `model ready · ${fmt.format(meta.n_markers)} markers · ${meta.n_components} PCs${meta.model_version ? ` · v${meta.model_version}` : ""}${meta.run_id ? ` · ${meta.run_id}` : ""}` : "model ready";
+  const ready = meta
+    ? ["model ready", meta.n_markers != null ? `${fmt.format(meta.n_markers)} markers` : null, meta.n_components != null ? `${meta.n_components} PCs` : null,
+       meta.model_version ? `v${meta.model_version}` : null, meta.run_id || null].filter(Boolean).join(" · ")
+    : "model ready";
   const map = {
     idle: ["badge-sex-u", "fa-circle", "model not loaded"],
     loading: ["badge-pending", "fa-spinner fa-spin", "loading model…"],
@@ -214,9 +219,15 @@ function renderModelStatus() {
     error: ["badge-sex-f", "fa-triangle-exclamation", `model error: ${error}`],
   };
   const [cls, icon, text] = map[status] || map.idle;
-  const sha = meta?.artifacts?.["model.onnx"]?.sha256;
-  const parity = meta?.parity ? ` · parity ${meta.parity.passed ? "passed" : "FAILED"} (${meta.parity.rows} rows, max |Δp| ${meta.parity.max_abs_proba_diff?.toExponential(1)})` : "";
-  el.innerHTML = `<span class="badge-soft ${cls}" title="${sha ? `sha256 ${esc(sha)}` : ""}${esc(parity)}"><i class="fa-solid ${icon} me-1"></i>${esc(text)}</span>`;
+  const sha = meta?.model_sha256;
+  // Step 6 evaluation (from data/reference_cohort.json) only counts if it is the same run as the loaded model.
+  const ev = cohort.summary?.test?.evaluation;
+  const sameRun = ev && meta?.run_id && ev.runId === meta.run_id;
+  const parity = sameRun && ev.parity ? `ONNX parity ${ev.parity.passed ? "passed" : "FAILED"} (${ev.parity.rows} test people, max |Δp| ${ev.parity.max_abs_proba_diff?.toExponential(1)})` : "";
+  const acc = sameRun ? `test ${ev.correct}/${ev.people} correct` : "";
+  const title = [sha ? `sha256 ${sha}` : "", meta?.model_name || "", acc, parity].filter(Boolean).join(" · ");
+  const suffix = status === "ready" && sameRun ? ` · ${ev.correct}/${ev.people} test${ev.parity ? (ev.parity.passed ? " · parity ✓" : " · parity ✗") : ""}` : "";
+  el.innerHTML = `<span class="badge-soft ${cls}" title="${esc(title)}"><i class="fa-solid ${icon} me-1"></i>${esc(text + suffix)}</span>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -307,6 +318,7 @@ async function loadCatalog() {
     })(),
   ]);
   renderParticipants();
+  renderModelStatus();
 }
 
 /** Normalise catalog rows, 1000 Genomes reference people and uploaded files into one table shape. */
@@ -322,6 +334,7 @@ function unifiedRows() {
       race: r.popName ? `${r.pop} · ${r.popName}` : r.pop,
       birthYear: "", state: "", published: "",
       group: r.superPop, groupKind: "known", calledFraction: null, pending: false, failed: null,
+      predicted: r.predicted || null, probs: r.probs || null,
       chipMatch: null, sizeMB: null,
     });
   }
@@ -381,7 +394,7 @@ function renderParticipants() {
   const all = unifiedRows();
   $("#participantCount").textContent = catalog.status === "loading" || cohort.status === "loading" ? "…" : fmt.format(all.length);
 
-  syncFilterOptions($("#participantChipFilter"), all.map((r) => r.chip), "All chips", part.chip);
+  syncFilterOptions($("#participantChipFilter"), all.map((r) => r.chip), "All chips", part.chip, chipLabel);
   syncFilterOptions($("#participantBuildFilter"), all.map((r) => r.build), "All builds", part.build);
   syncFilterOptions($("#participantSexFilter"), all.map((r) => r.sex).filter(Boolean), "Any sex", part.sex);
 
@@ -406,17 +419,25 @@ function renderParticipants() {
   const nParticipants = new Set(rows.map((r) => r.participant)).size;
   const n1k = rows.filter((r) => r.source.startsWith("1000G")).length;
   const nFiles = rows.filter((r) => r.source === "PGP" || r.source === "Upload").length;
+  const nValid = rows.filter((r) => r.valid && r.groupKind !== "known").length;
+  const nClassified = rows.filter((r) => r.group && r.groupKind !== "known").length;
+  const nUploaded = rows.filter((r) => r.source === "Upload").length;
+  const testPred = rows.filter((r) => r.groupKind === "known" && r.predicted);
+  const testCorrect = testPred.filter((r) => r.predicted === r.group).length;
   const popBadges = (m) => POPS.map((g) => `<span class="pop pop-${g}" title="${g}">${g} ${m[g] || 0}</span>`).join("");
+  const hasKnown = Object.keys(known).length > 0;
+  const hasPredicted = Object.keys(predicted).length > 0;
   stats.innerHTML = [
-    ["People", fmt.format(nParticipants)],
-    ["1000G reference", fmt.format(n1k)],
-    ["23andMe files", fmt.format(nFiles)],
-    ["Valid 23andMe", fmt.format(rows.filter((r) => r.valid && r.groupKind !== "known").length)],
-    ["Classified", fmt.format(rows.filter((r) => r.group && r.groupKind !== "known").length)],
-    ["Uploaded", fmt.format(rows.filter((r) => r.source === "Upload").length)],
-  ].map(([k, v]) => `<div class="mini-stat"><span class="v">${v}</span><span class="k">${k}</span></div>`).join("")
-    + `<div class="mini-stat"><span class="v d-flex gap-1 flex-wrap">${popBadges(known)}</span><span class="k">Known labels (1000G)</span></div>`
-    + `<div class="mini-stat"><span class="v d-flex gap-1 flex-wrap">${popBadges(predicted)}</span><span class="k">Predicted (23andMe)</span></div>`;
+    ["People", nParticipants],
+    ["1000G reference", n1k],
+    ["23andMe files", nFiles],
+    ["Valid 23andMe", nValid],
+    ["Classified v5 chip", nClassified],
+    ["Uploaded", nUploaded],
+  ].filter(([, v]) => v > 0).map(([k, v]) => `<div class="mini-stat"><span class="v">${fmt.format(v)}</span><span class="k">${k}</span></div>`).join("")
+    + (testPred.length ? `<div class="mini-stat" title="Held-out 1000 Genomes test people whose predicted group matches the known label (run ${esc(cohort.summary?.test?.evaluation?.runId || "")})"><span class="v">${fmt.format(testCorrect)} / ${fmt.format(testPred.length)}</span><span class="k">Test predicted correctly</span></div>` : "")
+    + (hasKnown ? `<div class="mini-stat"><span class="v d-flex gap-1 flex-wrap">${popBadges(known)}</span><span class="k">Known labels (1000G)</span></div>` : "")
+    + (hasPredicted ? `<div class="mini-stat"><span class="v d-flex gap-1 flex-wrap">${popBadges(predicted)}</span><span class="k">Predicted (23andMe)</span></div>` : "");
 
   const pages = Math.max(1, Math.ceil(rows.length / part.pageSize));
   part.page = Math.min(Math.max(1, part.page), pages);
@@ -446,7 +467,7 @@ function renderParticipants() {
     </tr>`).join("");
 
   $("#participantSummary").innerHTML = rows.length
-    ? `Showing ${fmt.format(startI + 1)}–${fmt.format(Math.min(startI + part.pageSize, rows.length))} of ${fmt.format(rows.length)} rows · outlined group badges are <em>known</em> 1000 Genomes labels, filled badges are <em>predicted</em> · <sup>*</sup>sex inferred from X/Y calls for uploaded files`
+    ? `Showing ${fmt.format(startI + 1)}–${fmt.format(Math.min(startI + part.pageSize, rows.length))} of ${fmt.format(rows.length)} rows · outlined group badges are <em>known</em> 1000 Genomes labels, filled badges are <em>predicted</em> (test people show known → predicted) · <sup>*</sup>sex inferred from X/Y calls for uploaded files`
     : "No rows match the current filters.";
   renderPagination($("#participantPagination"), part.page, pages);
   markSort($("#participantTable"), part.sortKey, part.sortDir);
@@ -468,7 +489,14 @@ function sourceBadge(source) {
 function groupCell(r) {
   if (r.pending) return `<span class="badge-soft badge-pending" title="ONNX model artifacts not published yet"><i class="fa-regular fa-clock me-1"></i>model pending</span>`;
   if (r.failed) return `<span class="badge-soft badge-sex-f" title="${esc(r.failed)}"><i class="fa-solid fa-triangle-exclamation me-1"></i>failed</span>`;
-  if (r.group && r.groupKind === "known") return `<span class="pop pop-outline pop-${esc(r.group)}" title="Known 1000 Genomes super_pop label (not a prediction)">${esc(r.group)}</span>`;
+  if (r.group && r.groupKind === "known") {
+    const known = `<span class="pop pop-outline pop-${esc(r.group)}" title="Known 1000 Genomes super_pop label (not a prediction)">${esc(r.group)}</span>`;
+    if (!r.predicted) return known;
+    const ok = r.predicted === r.group;
+    const p = r.probs?.[r.predicted];
+    const title = `Predicted ${r.predicted}${p != null ? ` (${pct(p, 1)})` : ""} by the published model on the held-out test set — ${ok ? "matches" : "DIFFERS from"} the known label`;
+    return `${known}<i class="fa-solid fa-arrow-right-long mx-1 text-muted small" aria-hidden="true"></i><span class="pop pop-${esc(r.predicted)}" title="${esc(title)}">${esc(r.predicted)}${ok ? "" : ' <i class="fa-solid fa-triangle-exclamation"></i>'}</span>`;
+  }
   if (r.group) return `<span class="pop pop-${esc(r.group)}" title="Predicted by the ancestry classifier">${esc(r.group)}</span>`;
   if (r.source === "Upload") return `<button class="btn btn-sm btn-outline-primary py-0" data-act="classify">Classify</button>`;
   return `<span class="text-muted small">—</span>`;
@@ -482,10 +510,14 @@ function rowActions(r) {
     ${r.profileUrl ? `<a class="btn btn-sm btn-outline-secondary py-0" href="${esc(r.profileUrl)}" target="_blank" rel="noopener" title="${r.source === "PGP" ? "PGP profile" : "IGSR sample page"}"><i class="fa-solid ${r.source === "PGP" ? "fa-user" : "fa-globe"}"></i></a>` : ""}
     ${r.downloadUrl ? `<a class="btn btn-sm btn-outline-secondary py-0" href="${esc(r.downloadUrl)}" target="_blank" rel="noopener" title="Download from PGP"><i class="fa-solid fa-download"></i></a>` : ""}`;
 }
-function syncFilterOptions(select, values, allLabel, current) {
+function syncFilterOptions(select, values, allLabel, current, labelFn) {
   const uniq = [...new Set(values)].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
-  select.innerHTML = `<option value="">${allLabel}</option>` + uniq.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+  select.innerHTML = `<option value="">${allLabel}</option>` + uniq.map((v) => `<option value="${esc(v)}">${esc(labelFn ? labelFn(v) : v)}</option>`).join("");
   select.value = uniq.includes(current) ? current : "";
+}
+
+function chipLabel(v) {
+  return /^v\d/.test(String(v)) ? `23andMe ${v}` : v;
 }
 
 function markSort(table, key, dir) {
@@ -664,7 +696,7 @@ function renderPca() {
     empty.classList.remove("hidden");
     $("#pcaEmptyMsg").innerHTML = typeof Plotly === "undefined" ? "Plotly failed to load."
       : pca.ref === undefined ? "Loading PCA reference…"
-      : "No PCA coordinates yet. Publish <code>model/pca_reference.json</code> from the cloud run for the reference people, and/or classify an uploaded file (the model returns its PC scores).";
+      : "No PCA coordinates yet. Publish <code>model/pca_reference.json</code> from the cloud run for the reference people. Uploaded files appear here only if the model bundle exports a <code>pc_scores</code> output (the current bundle returns probabilities only).";
     return;
   }
   empty.classList.add("hidden");
@@ -852,8 +884,8 @@ function init() {
     if (p) { p.label = e.target.value.trim() || p.fileName; renderFileList(); renderGenotypes(); }
   });
   $("#participantExportBtn").addEventListener("click", () => downloadCsv("participants.csv",
-    ["participant", "source", "file", "chip", "build", "variants", "valid_23andme", "sex", "sex_kind", "population_or_race_ethnicity", "birth_year", "state", "published", "group", "group_kind", "called_fraction", "profile_url"],
-    participantRows(unifiedRows()).map((r) => [r.participant, r.source, r.fileName, r.chip, r.build, r.variants ?? "", r.valid, r.sex, r.sex ? r.sexKind : "", r.race, r.birthYear, r.state, r.published, r.group, r.group ? r.groupKind : "", r.calledFraction != null ? r.calledFraction.toFixed(4) : "", r.profileUrl || ""])));
+    ["participant", "source", "file", "chip", "build", "variants", "valid_23andme", "sex", "sex_kind", "population_or_race_ethnicity", "birth_year", "state", "published", "group", "group_kind", "test_predicted_group", "called_fraction", "profile_url"],
+    participantRows(unifiedRows()).map((r) => [r.participant, r.source, r.fileName, r.chip, r.build, r.variants ?? "", r.valid, r.sex, r.sex ? r.sexKind : "", r.race, r.birthYear, r.state, r.published, r.group, r.group ? r.groupKind : "", r.predicted || "", r.calledFraction != null ? r.calledFraction.toFixed(4) : "", r.profileUrl || ""])));
 
   // Genotypes
   $("#genoFileSelect").addEventListener("change", (e) => { geno.fileId = Number(e.target.value) || null; geno.page = 1; renderGenotypes(); });
@@ -891,6 +923,7 @@ function init() {
 
   renderAll();
   loadCatalog();
+  configure({ modelBase: "model/", ortBase: "vendor/onnxruntime-web/" });
   renderModelStatus();
   loadModel().catch(() => {}).finally(renderModelStatus);
   initPca();

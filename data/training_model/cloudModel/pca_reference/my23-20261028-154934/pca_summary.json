@@ -1,0 +1,40 @@
+{
+  "cohorts": {
+    "test501": 501,
+    "train2003": 2003
+  },
+  "explained_variance_ratio": [
+    0.05645854398608208,
+    0.032130107283592224,
+    0.010750104673206806,
+    0.008100347593426704,
+    0.001712790341116488,
+    0.0015846993774175644,
+    0.0012789855245500803,
+    0.001015173620544374,
+    0.0009302950347773731,
+    0.0008727828972041607
+  ],
+  "marker_count": 335663,
+  "markers_sha256": "772bea50eb7b044afaa09b1895354bb61bbcf2080fa6e4c451d05aa1761dff83",
+  "method": "Frozen fitted imputer, scaler, and PCA; ordered markers count the saved alleles",
+  "model_name": "my23_v5_ancestry_model",
+  "note": "Coordinates describe the model PCA; pgsc_calc fits its own reference PCA.",
+  "pc_columns": [
+    "PC1",
+    "PC2",
+    "PC3",
+    "PC4",
+    "PC5",
+    "PC6",
+    "PC7",
+    "PC8",
+    "PC9",
+    "PC10"
+  ],
+  "pc_count": 10,
+  "run_id": "my23-20261028-154934",
+  "source_model_sha256": "907f29d8145ceb34c9fcfeb209dee4b35af8df120a7919a46d31a9f8231ca8fa",
+  "source_step5": "gs://all23_0710/ancestry/my23_v5_ancestry_model/5_fit_pca_and_classifier/results/my23-20261028-154934",
+  "source_step6": "gs://all23_0710/ancestry/my23_v5_ancestry_model/6_test_model/results/my23-20261028-154934"
+}

@@ -1,0 +1,11 @@
+{
+  "complete": true,
+  "files_sha256": {
+    "pca_summary.json": "a1ebc6e47b64e2c94b361fa0518407bfb7c41bce450fef271ce9f30e6981f729",
+    "predictions.tsv": "8f02d417d336bc7fb238b88da954b3b7b141e6f397739227832acd242622ea21",
+    "test501_pcs.tsv": "6459597165913f7b369debb7ff8a6ffbf6992c1d46f6178fc3ae49b2799281ac",
+    "train2003_pcs.tsv": "f9d890d8976c30470d2ccc5ef27cc7465b647080f3c502ca31095e01091920f3"
+  },
+  "run_id": "my23-20261028-154934",
+  "source_model_sha256": "907f29d8145ceb34c9fcfeb209dee4b35af8df120a7919a46d31a9f8231ca8fa"
+}

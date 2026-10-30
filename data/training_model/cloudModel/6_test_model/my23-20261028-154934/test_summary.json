@@ -1,0 +1,12 @@
+{
+  "accuracy": 0.998003992015968,
+  "balanced_accuracy": 0.9973333333333333,
+  "correct": 500,
+  "missing_test_genotypes": 0,
+  "model_sha256": "907f29d8145ceb34c9fcfeb209dee4b35af8df120a7919a46d31a9f8231ca8fa",
+  "note": "Model is frozen. All 501 test people are retained. This is a rerun of an already examined reference split, not a new external validation.",
+  "run_id": "my23-20261028-154934",
+  "selected_markers": 335663,
+  "test_people": 501,
+  "training_people": 2003
+}
